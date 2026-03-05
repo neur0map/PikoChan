@@ -1,0 +1,20 @@
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Prowl
+.prowl/
+
+# Claude Code
+.claude/
+
+# Secrets
+.env
+*.pem
