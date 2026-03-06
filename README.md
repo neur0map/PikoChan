@@ -6,6 +6,10 @@
   <img src="https://img.shields.io/badge/LLM-local--first-brightgreen?style=flat" />
 </p>
 
+<p align="center">
+  <img src="PikoChan/Assets/Moods/Irritated/pikochan_irritated.png" width="180" alt="PikoChan" />
+</p>
+
 <h1 align="center">PikoChan</h1>
 
 <p align="center">
