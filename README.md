@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-000000?style=flat&logo=apple&logoColor=white" />
   <img src="https://img.shields.io/badge/swift-6.0-F05138?style=flat&logo=swift&logoColor=white" />
-  <img src="https://img.shields.io/badge/version-0.1.0--alpha-blue?style=flat" />
+  <img src="https://img.shields.io/badge/version-0.2.0--alpha-blue?style=flat" />
   <img src="https://img.shields.io/github/license/neur0map/PikoChan?style=flat" />
   <img src="https://img.shields.io/badge/LLM-local--first-brightgreen?style=flat" />
 </p>
@@ -50,32 +50,24 @@ PikoChan draws from three projects that got specific things right:
 
 ---
 
-## Current State: v0.1.0-alpha
+## Current State: v0.2.0-alpha
 
-The UI foundation is in place. PikoChan can peek out of the notch, expand into a panel, accept text input, and show a listening state — all with spring-physics animations that match Apple's own Dynamic Island.
+PikoChan has a brain. She can think, respond, and hold a conversation — all from inside your notch.
 
 **What works today:**
 
-- Borderless `NSPanel` anchored to the hardware notch, sitting above all other windows
-- Five-state system: Hidden → Hovered (peek) → Expanded → Typing → Listening
-- Spring animations on every state transition with continuous clip shapes matching Apple's hardware curves
-- Dynamic mouse event passthrough — the panel never blocks your menu bar or other apps when collapsed
-- Smart hover detection with debouncing and configurable zones
-- Custom `NSTextField` integration that avoids SwiftUI's ViewBridge issues with non-activating panels
-- Right-click context menu (Settings, Quit) accessible in any state
-- Full settings window with native macOS toolbar tabs:
-  - **Appearance** — background style, accent colors, sprite size
-  - **Behavior** — launch at login, hover triggers, close behavior
-  - **Notch Fine-Tune** — pixel-level offset adjustments for different MacBook models
-  - **About** — version info, reset to defaults
-- Settings changes apply live — no restart needed
-- Runs as a background agent (no dock icon, no menu bar clutter)
+- Everything from v0.1.0 (notch UI, animations, state machine, settings)
+- `~/.pikochan/` directory structure with human-readable YAML configs
+- Local LLM inference via Apple FoundationModels (macOS 26+) and Ollama-compatible HTTP endpoints
+- Cloud API fallback (OpenAI, Anthropic) with API key management and model selection
+- Full conversation loop: type in the notch, get a response from a local or cloud model
+- Animated response bubble with status indicators (thinking, error, response)
+- AI Model settings tab: provider picker, local/cloud config, API key fields
 
 **What doesn't exist yet:**
 
-- No LLM backend — text input goes nowhere
-- No personality system — she's silent
-- No memory — she forgets everything
+- No personality system — she responds, but without soul
+- No memory — she forgets everything between conversations
 - No terminal or browser control
 - No voice (STT/TTS)
 - No skills
@@ -125,16 +117,16 @@ PikoChan is built in four layers, each with a clear responsibility:
 
 ## Roadmap
 
-### v0.2.0 — Brain Foundation
+### v0.2.0 — Brain Foundation ✅
 
-Give PikoChan the ability to think and respond.
+PikoChan can think and respond.
 
 - `~/.pikochan/` directory structure with human-readable YAML configs
-- Local LLM inference via [MLX Swift](https://github.com/ml-explore/mlx-swift) on Apple Silicon
-- Starting model targets: Phi-3.5 mini (3.8B), Qwen2.5 (3B), Gemma 2 (2B)
-- Cloud API fallback (OpenAI, Anthropic) for users who want it
-- Basic conversation loop: type in the notch, get a response from a local model
-- Response rendering in the notch UI
+- Local LLM inference via Apple FoundationModels (macOS 26+) and Ollama HTTP fallback
+- Cloud API fallback (OpenAI, Anthropic) with automatic local → cloud routing
+- Full conversation loop: type in the notch, get a response
+- Response bubble in the notch UI with status indicators
+- AI Model settings tab for provider and model configuration
 
 ### v0.3.0 — Soul & Memory
 
