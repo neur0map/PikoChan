@@ -9,20 +9,25 @@ final class SettingsWindowController {
 
     private var windowController: NSWindowController?
 
-    func show() {
+    func show(tab: String? = nil) {
         NotificationCenter.default.post(name: Self.willShowNotification, object: nil)
-        NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
 
         if let wc = windowController {
-            wc.window?.makeKeyAndOrderFront(nil)
+            if let tab, let tabVC = wc.contentViewController as? NSTabViewController {
+                if let idx = tabVC.tabViewItems.firstIndex(where: { ($0.identifier as? String) == tab }) {
+                    tabVC.selectedTabViewItemIndex = idx
+                }
+            }
+            activateAndShow(wc.window)
             return
         }
 
         let tabVC = NSTabViewController()
-        tabVC.tabStyle = .toolbar  // Toolbar icons across the top — standard macOS prefs look.
+        tabVC.tabStyle = .toolbar
 
         let tabs: [(String, String, NSView)] = [
             ("Appearance", "paintbrush",                       NSHostingView(rootView: AppearanceTab())),
+            ("AI Model",   "cpu",                              NSHostingView(rootView: AIModelTab())),
             ("Behavior",   "gearshape",                        NSHostingView(rootView: BehaviorTab())),
             ("Notch",      "rectangle.topthird.inset.filled",  NSHostingView(rootView: NotchTuneTab())),
             ("About",      "info.circle",                      NSHostingView(rootView: AboutTab())),
@@ -40,14 +45,41 @@ final class SettingsWindowController {
             tabVC.addTabViewItem(item)
         }
 
+        if let tab, let idx = tabVC.tabViewItems.firstIndex(where: { ($0.identifier as? String) == tab }) {
+            tabVC.selectedTabViewItemIndex = idx
+        }
+
         let w = NSWindow(contentViewController: tabVC)
         w.title = "PikoChan Settings"
         w.styleMask = [.titled, .closable]
         w.isReleasedWhenClosed = false
+        // Float above the notch panel (.screenSaver = 1000).
+        w.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)) + 1)
         w.center()
 
         let wc = NSWindowController(window: w)
         wc.showWindow(nil)
+        activateAndShow(w)
         windowController = wc
+    }
+
+    private func activateAndShow(_ window: NSWindow?) {
+        guard let window else { return }
+        // Temporarily become a regular app so we can receive key events.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+
+        // Go back to accessory (no dock icon) when all windows close.
+        NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: window)
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            _ = self
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }

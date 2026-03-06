@@ -6,12 +6,29 @@ import Observation
 @Observable
 final class NotchManager {
 
+    enum Mood: String, CaseIterable {
+        case neutral = "Neutral"
+        case playful = "Playful"
+        case irritated = "Irritated"
+        case proud = "Proud"
+        case concerned = "Concerned"
+        case snarky = "Snarky"
+        case encouraging = "Encouraging"
+    }
+
     // MARK: - State
 
     var state: NotchState = .hidden
     var notchSize: CGSize = .zero
     var menubarHeight: CGFloat = 0
     var inputText: String = ""
+    var currentMood: Mood = .neutral
+    var isResponding: Bool = false
+    var lastResponseText: String = ""
+    var lastResponseError: String?
+    var lastResponseSuggestion: String?
+    var lastErrorOpensSettings: Bool = false
+    var isResponseExpanded: Bool = false
 
     /// Remembers what the user was doing before hiding, so reopening resumes.
     private var lastActiveState: NotchState = .expanded
@@ -20,6 +37,8 @@ final class NotchManager {
 
     private(set) var panel: PikoPanel?
     private var panelSize: CGSize = .zero
+    private var moodImages: [Mood: NSImage] = [:]
+    private let brain = PikoBrain()
 
     // MARK: - Monitors
 
@@ -31,6 +50,8 @@ final class NotchManager {
     private var localRightClickMonitor: Any?
     private var localKeyMonitor: Any?
     private var hoverDebounceTask: Task<Void, Never>?
+    private var currentResponseTask: Task<Void, Never>?
+    private var hoverPollTimer: Timer?
     private let menuTarget = ContextMenuTarget()
 
     // MARK: - Geometry
@@ -41,6 +62,13 @@ final class NotchManager {
 
     func start() {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        do {
+            try brain.bootstrap()
+        } catch {
+            lastResponseError = "Couldn't set up config folder"
+            lastResponseSuggestion = "Check permissions on ~/.pikochan/"
+        }
+        loadMoodImages()
         setupPanel(on: screen)
         installMonitors()
         observeScreenChanges()
@@ -49,6 +77,8 @@ final class NotchManager {
     }
 
     func teardown() {
+        currentResponseTask?.cancel()
+        currentResponseTask = nil
         removeMonitors()
         panel?.orderOut(nil)
         panel = nil
@@ -120,28 +150,46 @@ final class NotchManager {
         switch state {
         case .hidden:    notchSize.width
         case .hovered:   notchSize.width
-        case .expanded:  280
-        case .typing:    290
-        case .listening: 280
+        case .expanded, .typing, .listening:
+            activeContentWidth
         }
     }
 
     private var contentHeight: CGFloat {
         let pad = PikoSettings.shared.contentPadding
-        let sprite = PikoSettings.shared.spriteSize
         return switch state {
         case .hidden:    notchSize.height
-        case .hovered:   notchSize.height + pad
-        case .expanded:  notchSize.height + pad + sprite + 12 + 36 + 16
-        case .typing:    notchSize.height + pad + 90 + 8 + 34 + 16
-        case .listening: notchSize.height + pad + 90 + 6 + 28 + 6 + 28 + 12
+        case .hovered:   notchSize.height + pad + 12
+        case .expanded, .typing, .listening:
+            activeContentHeight
         }
+    }
+
+    var activeContentWidth: CGFloat { 290 }
+
+    var showsResponseBubble: Bool {
+        isResponding || !lastResponseText.isEmpty || lastResponseError != nil
+    }
+
+    private var responseBlockHeight: CGFloat {
+        guard showsResponseBubble else { return 0 }
+        return isResponseExpanded ? 230 : 86
+    }
+
+    var activeContentHeight: CGFloat {
+        let pad = PikoSettings.shared.contentPadding
+        let sprite = PikoSettings.shared.spriteSize
+        let expandedHeight = notchSize.height + pad + sprite + 12 + 36 + 16 + responseBlockHeight
+        let typingHeight = notchSize.height + pad + sprite + 8 + 34 + 12 + responseBlockHeight
+        let listeningHeight = notchSize.height + pad + sprite + 6 + 28 + 6 + 28 + 12 + responseBlockHeight
+        return max(expandedHeight, max(typingHeight, listeningHeight))
     }
 
     // MARK: - State Transitions
 
     func transition(to newState: NotchState) {
         guard newState != state else { return }
+        let oldState = state
 
         // Remember what the user was doing before hiding.
         if newState == .hidden && state != .hovered {
@@ -165,24 +213,36 @@ final class NotchManager {
             state = newState
         }
 
-        if newState == .hidden || newState == .hovered {
+        switch newState {
+        case .hidden:
+            // Cancel in-flight response when hiding.
+            if isResponding {
+                cancelResponse()
+            }
+            // Only hidden truly ignores all mouse events.
             panel?.ignoresMouseEvents = true
             panel?.styleMask.insert(.nonactivatingPanel)
             panel?.syncActivationState()
-        } else {
+
+        case .hovered:
+            // Hovered must receive events so SwiftUI .onHover and click work.
             panel?.ignoresMouseEvents = false
+            panel?.styleMask.insert(.nonactivatingPanel)
+            panel?.syncActivationState()
 
-            if newState == .typing {
-                // Remove .nonactivatingPanel so macOS connects the text input
-                // service chain, then sync the WindowServer tag (FB16484811).
-                panel?.styleMask.remove(.nonactivatingPanel)
-                panel?.syncActivationState()
-                NSApp.activate()
-            } else {
-                panel?.styleMask.insert(.nonactivatingPanel)
-                panel?.syncActivationState()
-            }
+        case .expanded, .listening:
+            panel?.ignoresMouseEvents = false
+            panel?.styleMask.insert(.nonactivatingPanel)
+            panel?.syncActivationState()
+            panel?.makeKey()
 
+        case .typing:
+            // Only typing removes .nonactivatingPanel so macOS connects
+            // the text input service chain (FB16484811).
+            panel?.ignoresMouseEvents = false
+            panel?.styleMask.remove(.nonactivatingPanel)
+            panel?.syncActivationState()
+            NSApp.activate()
             panel?.makeKey()
         }
 
@@ -192,6 +252,130 @@ final class NotchManager {
     /// Reopen to whatever the user was last doing.
     func reopen() {
         transition(to: lastActiveState)
+    }
+
+    var spriteImage: Image {
+        if let moodImage = moodImages[currentMood] {
+            Image(nsImage: moodImage)
+        } else {
+            Image("pikochan_sprite")
+        }
+    }
+
+    @discardableResult
+    func applyMoodCommand(from rawText: String) -> Bool {
+        guard let mood = Self.parseMood(from: rawText) else { return false }
+        currentMood = mood
+        lastResponseError = nil
+        lastResponseText = "Mood set to \(mood.rawValue)."
+        return true
+    }
+
+    func submitTextInput() {
+        let prompt = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+        guard !isResponding else { return }
+
+        if applyMoodCommand(from: prompt) {
+            inputText = ""
+            transition(to: .expanded)
+            return
+        }
+
+        // Cancel any previous in-flight request.
+        currentResponseTask?.cancel()
+
+        inputText = ""
+        isResponding = true
+        lastResponseError = nil
+        lastResponseSuggestion = nil
+        lastErrorOpensSettings = false
+        lastResponseText = ""
+        isResponseExpanded = false
+        transition(to: .expanded)
+
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            self.brain.reloadConfig()
+
+            var hasContent = false
+            for await chunk in self.brain.respondStreaming(to: prompt) {
+                guard !Task.isCancelled else { break }
+                // Detect embedded error markers from the stream.
+                if chunk.hasPrefix("\n\n[Error: ") {
+                    let errorText = chunk
+                        .replacingOccurrences(of: "\n\n[Error: ", with: "")
+                        .replacingOccurrences(of: "]", with: "")
+                    self.setError(fromLocalizedDescription: errorText)
+                } else {
+                    self.lastResponseText += chunk
+                    hasContent = true
+                }
+            }
+
+            if !Task.isCancelled {
+                if !hasContent && self.lastResponseError == nil {
+                    self.setError(message: "Model returned nothing", suggestion: "Try a different prompt or model")
+                }
+                self.isResponding = false
+            } else {
+                self.isResponding = false
+            }
+            self.currentResponseTask = nil
+        }
+    }
+
+    func cancelResponse() {
+        currentResponseTask?.cancel()
+        currentResponseTask = nil
+        isResponding = false
+    }
+
+    func openSettingsToAIModel() {
+        SettingsWindowController.shared.show(tab: "AI Model")
+    }
+
+    private func setError(message: String, suggestion: String? = nil, opensSettings: Bool = false) {
+        lastResponseError = message
+        lastResponseSuggestion = suggestion
+        lastErrorOpensSettings = opensSettings
+
+        // Flash concerned mood on error, revert after 2 seconds.
+        let previousMood = currentMood
+        currentMood = .concerned
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            if self.currentMood == .concerned {
+                self.currentMood = previousMood
+            }
+        }
+    }
+
+    private func setError(fromLocalizedDescription desc: String) {
+        // Try to match against known PikoBrainError patterns.
+        let suggestion: String?
+        let opensSettings: Bool
+        switch desc {
+        case let s where s.contains("Can't reach local model"):
+            suggestion = "Start Ollama or switch to cloud in Settings"
+            opensSettings = true
+        case let s where s.contains("API key was rejected"):
+            suggestion = "Check your key in Settings → AI Model"
+            opensSettings = true
+        case let s where s.contains("No API key configured"):
+            suggestion = "Add your key in Settings → AI Model"
+            opensSettings = true
+        case let s where s.contains("Too many requests"):
+            suggestion = "Wait a moment and try again"
+            opensSettings = false
+        case let s where s.contains("Model returned nothing"):
+            suggestion = "Try a different prompt or model"
+            opensSettings = false
+        default:
+            suggestion = "Check your connection and try again"
+            opensSettings = false
+        }
+        setError(message: desc, suggestion: suggestion, opensSettings: opensSettings)
     }
 
     // MARK: - Mouse Monitors
@@ -263,6 +447,10 @@ final class NotchManager {
                 return event
             }
         }
+
+        // Poll timer fallback — mouseMoved global monitors are unreliable
+        // for panels with ignoresMouseEvents, so we poll at 50ms as backup.
+        startHoverPollingFallback()
     }
 
     private func removeMonitors() {
@@ -277,6 +465,17 @@ final class NotchManager {
         globalRightClickMonitor = nil
         localRightClickMonitor = nil
         localKeyMonitor = nil
+        hoverPollTimer?.invalidate()
+        hoverPollTimer = nil
+    }
+
+    private func startHoverPollingFallback() {
+        hoverPollTimer?.invalidate()
+        hoverPollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.handleMouseMoved()
+        }
+        RunLoop.main.add(hoverPollTimer!, forMode: .common)
     }
 
     private func handleMouseMoved() {
@@ -313,8 +512,20 @@ final class NotchManager {
             if !NSMouseInRect(mouse, expandedZone, false) {
                 transition(to: .hidden)
             }
+            // Pass through clicks outside the visible notch content.
+            if let panel {
+                let overContent = panel.isMouseOverContent(mouse)
+                if panel.ignoresMouseEvents == overContent {
+                    panel.ignoresMouseEvents = !overContent
+                }
+            }
 
-        case .expanded, .typing, .listening:
+        case .typing:
+            // Never toggle ignoresMouseEvents during typing — it steals
+            // focus from the text field.
+            break
+
+        case .expanded, .listening:
             // Dynamically toggle mouse passthrough so areas outside the content
             // don't block other windows.
             if let panel {
@@ -323,6 +534,72 @@ final class NotchManager {
                     panel.ignoresMouseEvents = !overContent
                 }
             }
+        }
+    }
+
+    // MARK: - Mood Assets
+
+    private func loadMoodImages() {
+        let fm = FileManager.default
+        let exts = Set(["png", "jpg", "jpeg", "webp"])
+        moodImages.removeAll()
+
+        guard let baseURL = Bundle.main.resourceURL else { return }
+
+        for mood in Mood.allCases {
+            let moodFolder = baseURL.appendingPathComponent("Moods").appendingPathComponent(mood.rawValue)
+            let folderEntries = (try? fm.contentsOfDirectory(at: moodFolder, includingPropertiesForKeys: nil)) ?? []
+            let folderImage = folderEntries
+                .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+                .first { exts.contains($0.pathExtension.lowercased()) }
+
+            if let folderImage, let image = NSImage(contentsOf: folderImage) {
+                moodImages[mood] = image
+                continue
+            }
+
+            // Fallback when resources are flattened in app bundle.
+            let rootEntries = (try? fm.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil)) ?? []
+            let keywords = Self.moodResourceKeywords(for: mood)
+            if let flattened = rootEntries.first(where: { url in
+                let ext = url.pathExtension.lowercased()
+                let stem = url.deletingPathExtension().lastPathComponent.lowercased()
+                return exts.contains(ext) && keywords.contains(where: { stem.contains($0) })
+            }),
+               let image = NSImage(contentsOf: flattened) {
+                moodImages[mood] = image
+            }
+        }
+    }
+
+    private static func moodResourceKeywords(for mood: Mood) -> [String] {
+        switch mood {
+        case .neutral: return ["neutral"]
+        case .playful: return ["playful"]
+        case .irritated: return ["irritated", "irritate"]
+        case .proud: return ["proud"]
+        case .concerned: return ["concerned", "concern"]
+        case .snarky: return ["snarky"]
+        case .encouraging: return ["encouraging", "encourage"]
+        }
+    }
+
+    private static func parseMood(from rawText: String) -> Mood? {
+        let normalized = rawText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+
+        switch normalized {
+        case "neutral": return .neutral
+        case "playful": return .playful
+        case "irritated": return .irritated
+        case "proud": return .proud
+        case "concerned": return .concerned
+        case "snarky": return .snarky
+        case "encouraging": return .encouraging
+        default: return nil
         }
     }
 
@@ -350,7 +627,6 @@ final class NotchManager {
         guard let panel, let contentView = panel.contentView else { return }
 
         // Temporarily allow mouse events so the popup menu can interact.
-        let wasIgnoring = panel.ignoresMouseEvents
         panel.ignoresMouseEvents = false
         panel.makeKey()
 
@@ -360,8 +636,10 @@ final class NotchManager {
         // popUp is synchronous — blocks until the menu is dismissed.
         menu.popUp(positioning: nil, at: viewPoint, in: contentView)
 
-        // Restore original state after menu closes.
-        panel.ignoresMouseEvents = wasIgnoring
+        // Restore to match current state (menu actions like "Open Settings"
+        // may have triggered a state transition while the menu was open).
+        let shouldIgnore = (state == .hidden || state == .hovered)
+        panel.ignoresMouseEvents = shouldIgnore
     }
 
     // MARK: - Screen Change Observation
@@ -373,6 +651,7 @@ final class NotchManager {
             queue: .main
         ) { [weak self] _ in
             guard let self, let screen = NSScreen.main else { return }
+            self.transition(to: .hidden)
             self.setupPanel(on: screen)
         }
     }
@@ -381,7 +660,7 @@ final class NotchManager {
         NotificationCenter.default.addObserver(
             forName: SettingsWindowController.willShowNotification,
             object: nil,
-            queue: .main
+            queue: nil  // Synchronous — must fire before the window is created.
         ) { [weak self] _ in
             self?.transition(to: .hidden)
         }

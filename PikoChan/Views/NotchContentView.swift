@@ -32,21 +32,18 @@ struct NotchContentView: View {
         switch manager.state {
         case .hidden:    manager.notchSize.width
         case .hovered:   manager.notchSize.width
-        case .expanded:  280
-        case .typing:    290
-        case .listening: 280
+        case .expanded, .typing, .listening:
+            manager.activeContentWidth
         }
     }
 
     private var contentHeight: CGFloat {
         let pad = settings.contentPadding
-        let sprite = settings.spriteSize
         return switch manager.state {
         case .hidden:    manager.notchSize.height
-        case .hovered:   manager.notchSize.height + pad
-        case .expanded:  manager.notchSize.height + pad + sprite + 12 + 36 + 16
-        case .typing:    manager.notchSize.height + pad + 90 + 8 + 34 + 16
-        case .listening: manager.notchSize.height + pad + 90 + 6 + 28 + 6 + 28 + 12
+        case .hovered:   manager.notchSize.height + pad + 12
+        case .expanded, .typing, .listening:
+            manager.activeContentHeight
         }
     }
 
@@ -58,6 +55,41 @@ struct NotchContentView: View {
         }
     }
 
+    private var showsResponseBubble: Bool { manager.showsResponseBubble }
+
+    private var responseBlockHeight: CGFloat {
+        guard showsResponseBubble else { return 0 }
+        return manager.isResponseExpanded ? 230 : 86
+    }
+
+    private var expandedNaturalHeight: CGFloat {
+        let top = manager.notchSize.height + settings.contentPadding
+        let body = settings.spriteSize + 12 + 36 + 16 + responseBlockHeight
+        return top + body
+    }
+
+    private var typingNaturalHeight: CGFloat {
+        let top = manager.notchSize.height + settings.contentPadding
+        let body = settings.spriteSize + 8 + 34 + 12 + responseBlockHeight
+        return top + body
+    }
+
+    private var listeningNaturalHeight: CGFloat {
+        let top = manager.notchSize.height + settings.contentPadding
+        let body = settings.spriteSize + 6 + 28 + 6 + 28 + 12 + responseBlockHeight
+        return top + body
+    }
+
+    private func activeVerticalOffset(for state: NotchState) -> CGFloat {
+        let natural: CGFloat = switch state {
+        case .expanded: expandedNaturalHeight
+        case .typing: typingNaturalHeight
+        case .listening: listeningNaturalHeight
+        default: manager.activeContentHeight
+        }
+        return max(0, (manager.activeContentHeight - natural) / 2)
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -65,6 +97,7 @@ struct NotchContentView: View {
             notchBody
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea()
     }
 
     // MARK: - Notch Body
@@ -79,64 +112,211 @@ struct NotchContentView: View {
             }
 
             // ── Foreground Content ──
-            if manager.state == .expanded {
-                ExpandedView(
-                    onTextTapped: { manager.transition(to: .typing) },
-                    onMicTapped: { manager.transition(to: .listening) }
-                )
-                .padding(.top, manager.notchSize.height + settings.contentPadding)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
-                .transition(
-                    .asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)),
-                        removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
-                    )
-                )
-            }
+            if manager.state == .expanded || manager.state == .typing || manager.state == .listening {
+                VStack(spacing: 0) {
+                    manager.spriteImage
+                        .resizable()
+                        .interpolation(.none)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: settings.spriteSize)
 
-            if manager.state == .typing {
-                TypingView(manager: manager)
-                    .padding(.top, manager.notchSize.height + settings.contentPadding)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity.combined(with: .offset(y: 4)),
-                            removal: .opacity.combined(with: .offset(y: 4))
+                    if manager.state == .expanded {
+                        ExpandedView(
+                            onTextTapped: { manager.transition(to: .typing) },
+                            onMicTapped: { manager.transition(to: .listening) }
                         )
-                    )
-            }
+                        .padding(.top, 12)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 16)
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)),
+                                removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
+                            )
+                        )
+                    }
 
-            if manager.state == .listening {
-                ListeningView(
-                    onStopTapped: { manager.transition(to: .expanded) }
-                )
-                .padding(.top, manager.notchSize.height + settings.contentPadding)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-                .transition(
-                    .asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)),
-                        removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
-                    )
-                )
+                    if manager.state == .typing {
+                        TypingView(manager: manager)
+                            .padding(.top, 8)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                            .transition(
+                                .asymmetric(
+                                    insertion: .opacity.combined(with: .offset(y: 4)),
+                                    removal: .opacity.combined(with: .offset(y: 4))
+                                )
+                            )
+                    }
+
+                    if manager.state == .listening {
+                        ListeningView(
+                            onStopTapped: { manager.transition(to: .expanded) }
+                        )
+                        .padding(.top, 6)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)),
+                                removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
+                            )
+                        )
+                    }
+
+                    if showsResponseBubble {
+                        responseBubble
+                            .padding(.top, 8)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 6)
+                    }
+                }
+                .padding(.top, manager.notchSize.height + settings.contentPadding + activeVerticalOffset(for: manager.state))
             }
 
             // ── Hover peek indicator ──
             if manager.state == .hovered {
                 VStack {
                     Spacer()
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(.white.opacity(0.25))
-                        .frame(width: 36, height: 3)
-                        .padding(.bottom, 2)
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .fill(.white.opacity(0.4))
+                        .frame(width: 40, height: 4)
+                        .padding(.bottom, 4)
                 }
-                .transition(.opacity.combined(with: .offset(y: -3)))
+                .transition(.opacity.combined(with: .offset(y: -4)))
             }
         }
         .frame(width: contentWidth, height: contentHeight)
+        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: showsResponseBubble)
         .clipShape(NotchShape(topCornerRadius: topRadius, bottomCornerRadius: bottomRadius))
         .shadow(color: .black.opacity(shadowOpacity), radius: 20, y: 10)
+        .onHover { hovering in
+            // SwiftUI-native hover detection (works when ignoresMouseEvents=false).
+            if hovering && manager.state == .hidden {
+                manager.transition(to: .hovered)
+            } else if !hovering && manager.state == .hovered {
+                manager.transition(to: .hidden)
+            }
+        }
+    }
+
+    private var responseBubble: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if manager.isResponding {
+                ThinkingDotsView()
+            } else if let err = manager.lastResponseError {
+                Text(err)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.red.opacity(0.9))
+                    .lineLimit(2)
+
+                if let suggestion = manager.lastResponseSuggestion {
+                    if manager.lastErrorOpensSettings {
+                        Button {
+                            manager.openSettingsToAIModel()
+                        } label: {
+                            Text(suggestion)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.5))
+                                .underline()
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(suggestion)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                }
+            } else if manager.isResponseExpanded {
+                ScrollView {
+                    Text(manager.lastResponseText)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 200)
+            } else {
+                Text(manager.lastResponseText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(5)
+                    .multilineTextAlignment(.leading)
+
+                if manager.lastResponseText.count > 200 {
+                    Text("Tap to expand")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.white.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+                )
+        )
+        .overlay(alignment: .topTrailing) {
+            if !manager.isResponding && manager.lastResponseError == nil && !manager.lastResponseText.isEmpty {
+                CopyButton(text: manager.lastResponseText)
+                    .padding(6)
+            }
+        }
+        .onTapGesture {
+            if manager.lastResponseError == nil && !manager.lastResponseText.isEmpty {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    manager.isResponseExpanded.toggle()
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Thinking Dots Animation
+
+private struct ThinkingDotsView: View {
+    @State private var phase = 0
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3) { i in
+                Circle()
+                    .fill(.blue.opacity(phase == i ? 0.9 : 0.3))
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .onAppear {
+            Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    phase = (phase + 1) % 3
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Copy Button
+
+private struct CopyButton: View {
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            copied = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(copied ? 0.7 : 0.3))
+        }
+        .buttonStyle(.plain)
     }
 }

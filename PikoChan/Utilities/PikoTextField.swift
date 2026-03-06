@@ -45,6 +45,8 @@ struct PikoTextField: NSViewRepresentable {
         Coordinator(self)
     }
 
+    static let maxCharacters = 2000
+
     final class Coordinator: NSObject, NSTextFieldDelegate {
         let parent: PikoTextField
 
@@ -54,6 +56,10 @@ struct PikoTextField: NSViewRepresentable {
 
         func controlTextDidChange(_ obj: Notification) {
             guard let field = obj.object as? NSTextField else { return }
+            // Enforce character limit.
+            if field.stringValue.count > PikoTextField.maxCharacters {
+                field.stringValue = String(field.stringValue.prefix(PikoTextField.maxCharacters))
+            }
             parent.text = field.stringValue
         }
 
