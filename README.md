@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-000000?style=flat&logo=apple&logoColor=white" />
   <img src="https://img.shields.io/badge/swift-6.0-F05138?style=flat&logo=swift&logoColor=white" />
-  <img src="https://img.shields.io/badge/version-0.3.5--alpha-blue?style=flat" />
+  <img src="https://img.shields.io/badge/version-0.3.6--alpha-blue?style=flat" />
   <img src="https://img.shields.io/github/license/neur0map/PikoChan?style=flat" />
   <img src="https://img.shields.io/badge/LLM-local--first-brightgreen?style=flat" />
 </p>

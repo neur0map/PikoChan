@@ -4,12 +4,18 @@ import SwiftUI
 struct SoulTab: View {
     @State private var soul: PikoSoul = .default
     @State private var rulesText: String = ""
+    @State private var traitsText: String = ""
     @State private var status: String = ""
     @State private var statusColor: Color = .secondary
     @State private var showClearConfirmation = false
 
     @State private var memoryCount: Int = 0
     @State private var conversationCount: Int = 0
+    @State private var vectorCount: Int = 0
+
+    // Storage stats
+    @State private var dbSizeKB: Double = 0
+    @State private var journalSizeKB: Double = 0
 
     private let home = PikoHome()
     private let communicationStyles = ["casual", "formal", "playful", "snarky"]
@@ -22,11 +28,12 @@ struct SoulTab: View {
             personalitySection
             moodSection
             memorySection
+            storageSection
             logsSection
             setupSection
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 660)
+        .frame(width: 440)
         .onAppear { load() }
     }
 
@@ -44,7 +51,26 @@ struct SoulTab: View {
                 }
             }
 
-            Stepper("Sass level: \(soul.sassLevel)", value: $soul.sassLevel, in: 1...5)
+            VStack(alignment: .leading, spacing: 2) {
+                Stepper("Snark: \(soul.sassLevel)/5", value: $soul.sassLevel, in: 1...5)
+                Text("How snarky and opinionated replies are. 1 = gentle, 5 = maximum attitude.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            TextField("First person:", text: $soul.firstPerson)
+            TextField("Refers to user as:", text: $soul.refersToUserAs)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Traits (one per line):")
+                    .font(.callout)
+                TextEditor(text: $traitsText)
+                    .font(.body.monospaced())
+                    .frame(height: 60)
+                    .scrollContentBackground(.hidden)
+                    .padding(4)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Rules (one per line):")
@@ -96,6 +122,10 @@ struct SoulTab: View {
                 Text("\(memoryCount)")
                     .monospacedDigit()
             }
+            LabeledContent("Vectors indexed:") {
+                Text("\(vectorCount)")
+                    .monospacedDigit()
+            }
             LabeledContent("Conversations recorded:") {
                 Text("\(conversationCount)")
                     .monospacedDigit()
@@ -112,6 +142,31 @@ struct SoulTab: View {
             Button("Clear", role: .destructive) { clearMemory() }
         } message: {
             Text("This will delete all conversation history and memories. This cannot be undone.")
+        }
+    }
+
+    // MARK: - Storage
+
+    @ViewBuilder
+    private var storageSection: some View {
+        Section("Storage") {
+            LabeledContent("Database:") {
+                Text(formatSize(dbSizeKB))
+                    .monospacedDigit()
+            }
+            LabeledContent("Journal:") {
+                Text(formatSize(journalSizeKB))
+                    .monospacedDigit()
+            }
+
+            HStack {
+                Button("Prune Old Chats (90d+)") { pruneOldChats() }
+                Button("Rotate Journal") { rotateJournal() }
+            }
+
+            Text("Chat history older than 90 days is pruned. Journal rotates at 500 KB into monthly archives.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -168,11 +223,17 @@ struct SoulTab: View {
     private func load() {
         soul = PikoSoul.load(from: home.personalityFile)
         rulesText = soul.rules.joined(separator: "\n")
+        traitsText = soul.traits.joined(separator: "\n")
         refreshStats()
     }
 
     private func save() {
         soul.rules = rulesText
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        soul.traits = traitsText
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -194,12 +255,41 @@ struct SoulTab: View {
         showStatus("Memory cleared", color: .orange)
     }
 
+    private func pruneOldChats() {
+        let store = PikoStore(path: home.memoryDBFile)
+        let pruned = store?.pruneOldTurns(olderThanDays: 90) ?? 0
+        refreshStats()
+        showStatus("Pruned \(pruned) old turns", color: .green)
+    }
+
+    private func rotateJournal() {
+        let rotated = PikoMaintenance.rotateJournal(at: home.journalFile)
+        refreshStats()
+        if rotated {
+            showStatus("Journal rotated", color: .green)
+        } else {
+            showStatus("Journal under limit", color: .secondary)
+        }
+    }
+
     private func refreshStats() {
         let store = PikoStore(path: home.memoryDBFile)
         memoryCount = store?.memoryCount() ?? 0
         conversationCount = store?.turnCount() ?? 0
+        vectorCount = store?.vectorCount() ?? 0
         logEntryCount = PikoGateway.shared.todayEntryCount()
         logFileCount = PikoGateway.shared.allLogFiles().count
+
+        let fm = FileManager.default
+        dbSizeKB = Double((try? fm.attributesOfItem(atPath: home.memoryDBFile.path)[.size] as? Int) ?? 0) / 1024.0
+        journalSizeKB = Double((try? fm.attributesOfItem(atPath: home.journalFile.path)[.size] as? Int) ?? 0) / 1024.0
+    }
+
+    private func formatSize(_ kb: Double) -> String {
+        if kb >= 1024 {
+            return String(format: "%.1f MB", kb / 1024.0)
+        }
+        return String(format: "%.0f KB", kb)
     }
 
     private func openFile(_ url: URL) {

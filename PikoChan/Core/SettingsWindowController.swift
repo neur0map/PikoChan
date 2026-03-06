@@ -24,6 +24,7 @@ final class SettingsWindowController {
 
         let tabVC = NSTabViewController()
         tabVC.tabStyle = .toolbar
+        tabVC.title = "PikoChan Settings"
 
         let tabs: [(String, String, NSView)] = [
             ("Appearance", "paintbrush",                       NSHostingView(rootView: AppearanceTab())),
@@ -54,6 +55,8 @@ final class SettingsWindowController {
         w.title = "PikoChan Settings"
         w.styleMask = [.titled, .closable, .resizable]
         w.isReleasedWhenClosed = false
+        w.setContentSize(NSSize(width: 500, height: 900))
+        w.minSize = NSSize(width: 440, height: 600)
         // Float above the notch panel (.screenSaver = 1000).
         w.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)) + 1)
         w.center()

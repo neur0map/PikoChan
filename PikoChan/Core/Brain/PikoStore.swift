@@ -223,6 +223,31 @@ final class PikoStore {
         execute("DELETE FROM memories;")
     }
 
+    /// Deletes chat turns older than the given number of days. Returns count deleted.
+    @discardableResult
+    func pruneOldTurns(olderThanDays days: Int) -> Int {
+        let cutoff = Date.now.timeIntervalSince1970 - Double(days) * 86400.0
+        let countSQL = "SELECT COUNT(*) FROM chat_history WHERE created_at < ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, countSQL, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        sqlite3_bind_double(stmt, 1, cutoff)
+        var count = 0
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            count = Int(sqlite3_column_int(stmt, 0))
+        }
+        sqlite3_finalize(stmt)
+
+        if count > 0 {
+            let deleteSQL = "DELETE FROM chat_history WHERE created_at < ?;"
+            var delStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, deleteSQL, -1, &delStmt, nil) == SQLITE_OK else { return 0 }
+            sqlite3_bind_double(delStmt, 1, cutoff)
+            sqlite3_step(delStmt)
+            sqlite3_finalize(delStmt)
+        }
+        return count
+    }
+
     // MARK: - Memory Vectors
 
     func saveVector(memoryId: Int, vector: [Double], embedder: String) {

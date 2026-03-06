@@ -409,6 +409,61 @@ final class NotchManager {
         }
     }
 
+    /// PikoChan introduces herself after setup. No user message saved — just her greeting.
+    func sendFirstMessage() {
+        currentResponseTask?.cancel()
+        isResponding = true
+        lastResponseError = nil
+        lastResponseSuggestion = nil
+        lastErrorOpensSettings = false
+        lastResponseText = ""
+        isResponseExpanded = false
+        transition(to: .expanded)
+
+        currentResponseTask = Task { [weak self] in
+            guard let self else { return }
+            self.brain.reloadConfig()
+            self.currentMood = .playful
+
+            let introPrompt = "This is our first time meeting — I just set you up! Say hi to me."
+            var hasContent = false
+            var moodParsed = false
+            var rawAccumulated = ""
+
+            for await chunk in self.brain.respondStreaming(to: introPrompt, mood: .playful, skipHistory: true) {
+                guard !Task.isCancelled else { break }
+                if chunk.hasPrefix("\n\n[Error: ") {
+                    let errorText = chunk
+                        .replacingOccurrences(of: "\n\n[Error: ", with: "")
+                        .replacingOccurrences(of: "]", with: "")
+                    self.setError(fromLocalizedDescription: errorText)
+                } else {
+                    rawAccumulated += chunk
+                    if !moodParsed && rawAccumulated.contains("]") {
+                        let (parsedMood, cleanText) = MoodParser.parse(from: rawAccumulated)
+                        if let parsedMood { self.currentMood = parsedMood }
+                        moodParsed = true
+                        self.lastResponseText = cleanText
+                    } else if moodParsed {
+                        self.lastResponseText += chunk
+                    }
+                    hasContent = true
+                }
+            }
+
+            if !moodParsed && !rawAccumulated.isEmpty {
+                self.lastResponseText = rawAccumulated
+            }
+            if !hasContent && self.lastResponseError == nil {
+                // Fallback if LLM fails — hardcoded intro so user isn't left hanging.
+                self.lastResponseText = "Hey! I'm \(self.brain.soul.name) — I live right here in your notch. What's your name?"
+                self.currentMood = .playful
+            }
+            self.isResponding = false
+            self.currentResponseTask = nil
+        }
+    }
+
     func cancelResponse() {
         currentResponseTask?.cancel()
         currentResponseTask = nil

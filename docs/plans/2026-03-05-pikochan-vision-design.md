@@ -314,6 +314,18 @@ All files are:
 - [x] Re-run setup from Settings → Soul → "Re-run Setup Wizard"
 - [x] `PikoSecureField`: bullet-masking NSTextField for API key input in .screenSaver-level panels
 
+### v0.3.6 — Companion Personality & Maintenance ✅ (completed 2026-03-06)
+- [x] Post-setup intro message — PikoChan introduces herself and asks for the user's name after first-time setup
+- [x] Companion system prompt rewrite — "You are a COMPANION, not an assistant" framing with built-in behavior rules (no "How can I help?", share opinions, react naturally)
+- [x] postHistoryReminder rework — stronger personality reinforcement, genuine emotion matching, natural memory weaving
+- [x] `respondStreaming(skipHistory:)` — intro messages don't pollute chat history, hardcoded fallback if LLM fails
+- [x] Expanded Soul tab — editable traits, firstPerson, refersToUserAs fields + snark level with description
+- [x] Storage monitoring — DB size, journal size, vector count displayed in Settings → Soul → Storage section
+- [x] `PikoMaintenance` — auto journal rotation (500KB cap, monthly archives), auto chat pruning (90d+), runs on every launch
+- [x] `PikoStore.pruneOldTurns(olderThanDays:)` — automatic cleanup of old conversation history
+- [x] Settings window title fix — NSTabViewController `.toolbar` style title propagation
+- [x] Dynamic scrolling — SoulTab Form scrolls naturally within window instead of fixed-height clipping
+
 ### v0.4.0 — Hands
 - [ ] PikoTerminal: detect running terminals, type commands via AppleScript
 - [ ] PikoBrowser: open URLs, basic Chrome/Safari control

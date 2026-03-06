@@ -135,6 +135,9 @@ final class PikoBrain {
             historyCount: history.count,
             memoryCount: store?.memoryCount() ?? 0
         )
+
+        // Auto-maintenance: rotate journal, prune old chat turns.
+        PikoMaintenance.runAll(home: home, store: store)
     }
 
     func reloadConfig() {
@@ -215,7 +218,7 @@ final class PikoBrain {
 
     // MARK: - Streaming Response
 
-    func respondStreaming(to prompt: String, mood: NotchManager.Mood = .neutral) -> AsyncStream<String> {
+    func respondStreaming(to prompt: String, mood: NotchManager.Mood = .neutral, skipHistory: Bool = false) -> AsyncStream<String> {
         let clean = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else {
             return AsyncStream { $0.finish() }
@@ -293,12 +296,14 @@ final class PikoBrain {
                             durationMs: durationMs,
                             mood: parsedMood?.rawValue
                         )
-                        await MainActor.run {
-                            self.appendHistory(user: clean, assistant: cleanForHistory, mood: mood.rawValue)
+                        if !skipHistory {
+                            await MainActor.run {
+                                self.appendHistory(user: clean, assistant: cleanForHistory, mood: mood.rawValue)
+                            }
                         }
                     }
                 } catch is CancellationError {
-                    if !fullResponse.isEmpty {
+                    if !skipHistory && !fullResponse.isEmpty {
                         let (_, cleanForHistory) = MoodParser.parse(from: fullResponse)
                         await MainActor.run {
                             self.appendHistory(user: clean, assistant: cleanForHistory, mood: mood.rawValue)

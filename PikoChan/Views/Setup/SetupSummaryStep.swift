@@ -28,12 +28,11 @@ struct SetupSummaryStep: View {
             SetupActionButton("Let's go!", icon: "sparkles", accent: .green) {
                 do {
                     try setup.finalize(configStore: PikoConfigStore.shared)
-                    manager.brain.reloadConfig()
-                    manager.transition(to: .expanded)
                 } catch {
                     // Finalize failure is non-critical; proceed anyway.
-                    manager.transition(to: .expanded)
                 }
+                manager.brain.reloadConfig()
+                manager.sendFirstMessage()
             }
 
             StepDotsView(currentStep: setup.currentStep)
