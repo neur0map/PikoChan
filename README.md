@@ -223,6 +223,17 @@ PikoChan has personality, emotions, memory, and an HTTP gateway.
 - **Structured logging**: `PikoGateway` JSONL logger with daily rolling, 7-day prune, 50MB cap
 - **Settings**: Soul tab for personality editing and memory management
 
+### v0.3.5 — Setup & Semantic Memory
+
+First-time setup wizard and intelligent memory recall.
+
+- **In-notch setup wizard**: guided 5-step flow (welcome, provider, validation, memory engine, summary) with animations and typewriter text
+- **Provider validation**: Ollama reachability check, API key validation for OpenAI/Anthropic, Apple Intelligence availability
+- **Semantic memory search**: Apple NLEmbedding (built-in, zero dependencies) with model2vec fallback (~32MB). Replaces brute-force "inject all memories" with cosine similarity top-K recall via Accelerate.framework
+- **Memory vectors**: new `memory_vectors` SQLite table with embedding BLOBs, migration for existing v0.3.0 memories
+- **System checks**: SQLite, embedding model, gateway server, log directory — all validated with visual checklist
+- **Re-run support**: Settings → Soul → "Re-run Setup", version-aware step discovery for future upgrades
+
 ### v0.4.0 — Hands
 
 Give PikoChan the ability to interact with your Mac.

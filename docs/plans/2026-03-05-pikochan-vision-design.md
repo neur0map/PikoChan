@@ -303,6 +303,15 @@ All files are:
 - [x] SoulTab: Settings UI for personality editing + memory management
 - [x] Brain injection: PikoBrain shared between NotchManager and HTTPServer via AppDelegate
 
+### v0.3.5 — Setup & Semantic Memory
+- [ ] In-notch first-time setup wizard (5 steps: welcome, provider, validation, memory, summary)
+- [ ] Provider validation checks (Ollama ping, API key validation, Apple Intelligence availability)
+- [ ] PikoEmbedding: Apple NLEmbedding (primary) + model2vec fallback (~32MB download)
+- [ ] memory_vectors SQLite table + migration for existing v0.3.0 memories
+- [ ] Semantic recall: cosine similarity top-K via Accelerate.framework
+- [ ] SetupManager + SetupView with animated step transitions
+- [ ] Re-run setup from Settings, version-aware step discovery
+
 ### v0.4.0 — Hands
 - [ ] PikoTerminal: detect running terminals, type commands via AppleScript
 - [ ] PikoBrowser: open URLs, basic Chrome/Safari control
