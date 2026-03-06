@@ -50,18 +50,22 @@ PikoChan draws from three projects that got specific things right:
 
 ---
 
-## Current State: v0.3.5-alpha
+## Current State: v0.3.7-alpha
 
-PikoChan has a brain, a soul, semantic memory, and a first-time setup wizard. She remembers who you are, finds relevant memories using embedding similarity, and guides new users through configuration on first launch.
+PikoChan has a brain, a soul, semantic memory, a first-time setup wizard, companion personality, and filesystem guardrails. She remembers who you are, finds relevant memories using embedding similarity, introduces herself on first launch, and can evolve her own personality files while staying safe from self-destructive edits.
 
 **What works today:**
 
-- Everything from v0.1.0 (notch UI, animations, state machine, settings), v0.2.0 (brain, LLM providers, streaming), and v0.3.0 (soul, mood, memory, HTTP gateway)
+- Everything from v0.1.0 (notch UI, animations, state machine, settings), v0.2.0 (brain, LLM providers, streaming), v0.3.0 (soul, mood, memory, HTTP gateway), v0.3.5 (setup wizard, semantic memory), v0.3.6 (companion personality, maintenance), and v0.3.7 (path guard)
 - **Setup wizard**: in-notch 5-step guided flow on first launch — provider selection, API key validation, memory engine check, and summary
+- **Post-setup intro**: PikoChan introduces herself after setup and asks for the user's name — no cold start
 - **Semantic memory**: Snowflake Arctic Embed XS (384-dim, 22M params, CoreML) ranks memories by cosine similarity to the current query. Only relevant memories are injected into context — not all of them
 - **Asymmetric retrieval**: queries are prefixed with a retrieval instruction for better ranking accuracy; stored facts are embedded without prefix
 - **Hybrid recall**: memories with embeddings are ranked by similarity; unvectorized legacy memories are supplemented alongside
 - **WordPiece tokenizer**: BERT-compatible tokenizer (30522 vocab) runs entirely on-device for Arctic model input
+- **Companion personality**: system prompt frames PikoChan as a companion with opinions and moods, not an assistant
+- **Path guard**: OpenClaw-inspired filesystem guardrails — PikoChan can edit `~/.pikochan/` but cannot modify source code, app bundles, or system files
+- **Maintenance**: journal rotation (500KB cap, monthly archives), chat pruning (90 days)
 - Four LLM providers: Ollama (local), OpenAI, Anthropic, Apple Intelligence
 
 **Provider notes:**
@@ -170,7 +174,7 @@ PikoChan is built in four layers, each with a clear responsibility:
 │  PikoHTTPServer — HTTP gateway (port 7878)  │
 │  PikoGateway  — structured JSONL logging    │
 │  SetupManager — first-time setup wizard     │
-│  (v0.2.0 + v0.3.0 + v0.3.5 ✅)              │
+│  (v0.2.0–v0.3.7 ✅)                          │
 ├─────────────────────────────────────────────┤
 │              Layer 3: HANDS                 │
 │  PikoTerminal     — terminal control        │
