@@ -268,6 +268,20 @@ Make PikoChan shareable and self-improving.
 - Memory consolidation — periodic summarization of old memories into higher-level notes
 - Apple Foundation Models integration (macOS 26+) for zero-config local inference
 
+### Beyond Alpha — Headless, Bridges & Proactive Companionship
+
+Post-alpha features planned for late beta or stable release:
+
+- **Headless mode** — run PikoChan as a pure background service on Mac Mini/Studio/Pro (no notch UI, just brain + HTTP gateway)
+- **Telegram bridge** — chat with PikoChan via Telegram bot, proxied through `localhost:7878`
+- **Discord bridge** — Discord bot integration for server or DM conversations
+- **Webhook API** — generic webhook endpoint for any chat platform (Slack, WhatsApp, custom apps)
+- **Proactive check-ins** — PikoChan reaches out if you haven't talked in a few days
+- **Voice tone detection** — on-device vocal pattern analysis detects low mood or stress; PikoChan calls to keep you company
+- **Cross-platform presence** — check-ins and conversations consistent across notch, Telegram, Discord
+
+See the [vision doc](docs/plans/2026-03-05-pikochan-vision-design.md) for full details.
+
 ---
 
 ## Building from Source

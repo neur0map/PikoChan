@@ -355,6 +355,42 @@ All files are:
 
 ---
 
+## Post-Alpha Vision (Beta → Stable)
+
+Features beyond the alpha roadmap. These require the foundation layers (Brain, Hands, Voice, Skills) to be stable first.
+
+### Headless Mode & Chat Bridges
+
+PikoChan already runs a headless HTTP gateway (`localhost:7878`). On machines without a notch (Mac Mini, Mac Studio, Mac Pro), she can run as a pure background service — no UI, just brain + gateway.
+
+**Chat bridges** connect the gateway to external messaging platforms:
+
+- **Telegram bridge** — bot that proxies messages between a Telegram chat and `localhost:7878/chat`. Configurable via `~/.pikochan/bridges/telegram.yaml` (bot token, allowed chat IDs)
+- **Discord bridge** — Discord bot integration for server or DM conversations with PikoChan
+- **Webhook API** — generic webhook endpoint so any platform (Slack, WhatsApp via Twilio, custom apps) can plug in
+
+Bridges are lightweight processes (can be Swift, Python, or Node) that run alongside PikoChan. They share the same PikoBrain — memories, personality, and mood are consistent across all interfaces.
+
+```
+~/.pikochan/
+├── bridges/
+│   ├── telegram.yaml    # bot token, allowed chat IDs
+│   ├── discord.yaml     # bot token, server/channel config
+│   └── webhook.yaml     # generic webhook endpoints
+```
+
+### Proactive Companionship
+
+PikoChan doesn't just wait for you to talk to her — she reaches out.
+
+- **Check-in calls** — PikoChan notices if you haven't chatted in a few days and sends a message ("Hey, haven't heard from you in a while — everything good?"). Frequency configurable, never spammy
+- **Voice tone detection** — when TTS/STT is active, PikoChan analyzes vocal patterns (pitch, pace, energy). If she detects signs of low mood or stress, she proactively reaches out to keep you company — not as a therapist, but as a friend who noticed something's off
+- **Cross-platform presence** — check-ins work across all bridges (notch, Telegram, Discord). She picks the platform you've been most active on recently
+
+These features require v0.5.0 Voice to be stable. Voice tone analysis uses on-device audio feature extraction — no cloud processing of voice data.
+
+---
+
 ## Design Principles
 
 1. **Buddy, not assistant** — PikoChan has personality first, utility second
