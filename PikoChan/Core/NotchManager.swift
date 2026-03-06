@@ -50,6 +50,10 @@ final class NotchManager {
     /// Remembers what the user was doing before hiding, so reopening resumes.
     private var lastActiveState: NotchState = .expanded
 
+    // MARK: - Setup Wizard
+
+    private(set) var setupManager: SetupManager?
+
     // MARK: - Window
 
     private(set) var panel: PikoPanel?
@@ -96,6 +100,17 @@ final class NotchManager {
         observeScreenChanges()
         observeSettingsWindow()
         observeGeometrySettings()
+        observeRerunSetup()
+
+        // Launch setup wizard if not completed.
+        if !brain.config.setupComplete {
+            startSetupWizard()
+        }
+    }
+
+    func startSetupWizard() {
+        setupManager = SetupManager()
+        transition(to: .setup)
     }
 
     func teardown() {
@@ -122,7 +137,7 @@ final class NotchManager {
         menubarHeight = screen.menubarHeight
 
         let pw: CGFloat = max(380, notchSize.width + 200)
-        let ph: CGFloat = 380
+        let ph: CGFloat = 480
         panelSize = CGSize(width: pw, height: ph)
 
         let origin = NSPoint(
@@ -174,7 +189,7 @@ final class NotchManager {
         switch state {
         case .hidden:    notchSize.width
         case .hovered:   notchSize.width
-        case .expanded, .typing, .listening:
+        case .expanded, .typing, .listening, .setup:
             activeContentWidth
         }
     }
@@ -186,7 +201,14 @@ final class NotchManager {
         case .hovered:   notchSize.height + pad + 12
         case .expanded, .typing, .listening:
             activeContentHeight
+        case .setup:
+            setupContentHeight
         }
+    }
+
+    var setupContentHeight: CGFloat {
+        let pad = PikoSettings.shared.contentPadding
+        return notchSize.height + pad + 320
     }
 
     var activeContentWidth: CGFloat { 290 }
@@ -213,10 +235,14 @@ final class NotchManager {
 
     func transition(to newState: NotchState) {
         guard newState != state else { return }
-        let oldState = state
 
-        // Remember what the user was doing before hiding.
-        if newState == .hidden && state != .hovered {
+        // Clean up setup wizard when leaving .setup state.
+        if state == .setup && newState != .setup {
+            setupManager = nil
+        }
+
+        // Remember what the user was doing before hiding (but not .setup).
+        if newState == .hidden && state != .hovered && state != .setup {
             lastActiveState = state
         }
 
@@ -230,6 +256,8 @@ final class NotchManager {
         case .typing:
             .spring(response: 0.4, dampingFraction: 0.78, blendDuration: 0.15)
         case .listening:
+            .spring(response: 0.45, dampingFraction: 0.72, blendDuration: 0.2)
+        case .setup:
             .spring(response: 0.45, dampingFraction: 0.72, blendDuration: 0.2)
         }
 
@@ -260,8 +288,8 @@ final class NotchManager {
             panel?.syncActivationState()
             panel?.makeKey()
 
-        case .typing:
-            // Only typing removes .nonactivatingPanel so macOS connects
+        case .typing, .setup:
+            // Typing and setup remove .nonactivatingPanel so macOS connects
             // the text input service chain (FB16484811).
             panel?.ignoresMouseEvents = false
             panel?.styleMask.remove(.nonactivatingPanel)
@@ -468,6 +496,9 @@ final class NotchManager {
                 if NSMouseInRect(mouse, self.hoverZone, false) {
                     self.reopen()
                 }
+            case .setup:
+                // Don't dismiss setup on outside click.
+                break
             case .expanded, .typing, .listening:
                 // Click outside visible content → hide (but preserve state).
                 if let panel = self.panel, !panel.isMouseOverContent(mouse) {
@@ -505,6 +536,9 @@ final class NotchManager {
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.keyCode == 53 else { return event }
             switch self.state {
+            case .setup:
+                // Don't dismiss setup on escape.
+                return nil
             case .typing, .listening:
                 self.transition(to: .expanded)
                 return nil
@@ -588,8 +622,8 @@ final class NotchManager {
                 }
             }
 
-        case .typing:
-            // Never toggle ignoresMouseEvents during typing — it steals
+        case .typing, .setup:
+            // Never toggle ignoresMouseEvents during typing/setup — it steals
             // focus from the text field.
             break
 
@@ -719,9 +753,15 @@ final class NotchManager {
             queue: .main
         ) { [weak self] _ in
             guard let self, let screen = NSScreen.main else { return }
-            self.transition(to: .hidden)
-            self.setupPanel(on: screen)
+            self.handleScreenChange(screen: screen)
         }
+    }
+
+    private func handleScreenChange(screen: NSScreen) {
+        let wasSetup = state == .setup
+        transition(to: .hidden)
+        setupPanel(on: screen)
+        if wasSetup { transition(to: .setup) }
     }
 
     private func observeSettingsWindow() {
@@ -730,7 +770,22 @@ final class NotchManager {
             object: nil,
             queue: nil  // Synchronous — must fire before the window is created.
         ) { [weak self] _ in
-            self?.transition(to: .hidden)
+            self?.hideUnlessSetup()
+        }
+    }
+
+    private func hideUnlessSetup() {
+        guard state != .setup else { return }
+        transition(to: .hidden)
+    }
+
+    private func observeRerunSetup() {
+        NotificationCenter.default.addObserver(
+            forName: .pikoRerunSetup,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.startSetupWizard()
         }
     }
 
@@ -757,4 +812,10 @@ final class NotchManager {
     @objc func quitApp() {
         NSApp.terminate(nil)
     }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    static let pikoRerunSetup = Notification.Name("pikoRerunSetup")
 }

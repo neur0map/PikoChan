@@ -23,6 +23,7 @@ struct PikoHome {
     var terminalSkillFile: URL { skillsDir.appendingPathComponent("terminal.md") }
     var browserSkillFile: URL { skillsDir.appendingPathComponent("browser.md") }
     var weatherSkillFile: URL { skillsDir.appendingPathComponent("weather.md") }
+    var configFileExists: Bool { FileManager.default.fileExists(atPath: configFile.path) }
     var memoryDBFile: URL { memoryDir.appendingPathComponent("pikochan.db") }
     var journalFile: URL { memoryDir.appendingPathComponent("journal.md") }
     var mcpServersFile: URL { mcpDir.appendingPathComponent("servers.yaml") }
@@ -61,6 +62,7 @@ cloud_fallback: none
 openai_model: gpt-4o-mini
 anthropic_model: claude-3-5-haiku-latest
 gateway_port: 7878
+setup_complete: false
 # API keys are stored securely in macOS Keychain.
 # Configure them in Settings → AI Model.
 """

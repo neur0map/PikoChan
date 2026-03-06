@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-000000?style=flat&logo=apple&logoColor=white" />
   <img src="https://img.shields.io/badge/swift-6.0-F05138?style=flat&logo=swift&logoColor=white" />
-  <img src="https://img.shields.io/badge/version-0.3.0--alpha-blue?style=flat" />
+  <img src="https://img.shields.io/badge/version-0.3.5--alpha-blue?style=flat" />
   <img src="https://img.shields.io/github/license/neur0map/PikoChan?style=flat" />
   <img src="https://img.shields.io/badge/LLM-local--first-brightgreen?style=flat" />
 </p>
@@ -50,26 +50,24 @@ PikoChan draws from three projects that got specific things right:
 
 ---
 
-## Current State: v0.3.0-alpha
+## Current State: v0.3.5-alpha
 
-PikoChan has a brain, a soul, and memory. She remembers who you are, has moods that shift with the conversation, and can be accessed headlessly via HTTP.
+PikoChan has a brain, a soul, semantic memory, and a first-time setup wizard. She remembers who you are, finds relevant memories using embedding similarity, and guides new users through configuration on first launch.
 
 **What works today:**
 
-- Everything from v0.1.0 (notch UI, animations, state machine, settings) and v0.2.0 (brain, LLM providers, streaming)
-- **Soul system**: personality loaded from `personality.yaml` — traits, communication style, sass level, behavioral rules
-- **Mood system**: dynamic mood tags (`[playful]`, `[snarky]`, `[proud]`, etc.) parsed from LLM responses, driving sprite changes
-- **Memory**: SQLite-backed fact extraction and recall — PikoChan remembers your name, preferences, and conversations across restarts
-- **Journal**: human-readable `~/.pikochan/memory/journal.md` of everything she remembers about you
-- **HTTP Gateway**: lightweight NWListener server on port 7878 — talk to PikoChan via `curl` or any HTTP client
-- **Structured logging**: JSONL gateway logs at `~/.pikochan/logs/` with rolling daily files and auto-pruning
-- **Settings**: Soul tab for personality editing and memory management
+- Everything from v0.1.0 (notch UI, animations, state machine, settings), v0.2.0 (brain, LLM providers, streaming), and v0.3.0 (soul, mood, memory, HTTP gateway)
+- **Setup wizard**: in-notch 5-step guided flow on first launch — provider selection, API key validation, memory engine check, and summary
+- **Semantic memory**: Snowflake Arctic Embed XS (384-dim, 22M params, CoreML) ranks memories by cosine similarity to the current query. Only relevant memories are injected into context — not all of them
+- **Asymmetric retrieval**: queries are prefixed with a retrieval instruction for better ranking accuracy; stored facts are embedded without prefix
+- **Hybrid recall**: memories with embeddings are ranked by similarity; unvectorized legacy memories are supplemented alongside
+- **WordPiece tokenizer**: BERT-compatible tokenizer (30522 vocab) runs entirely on-device for Arctic model input
 - Four LLM providers: Ollama (local), OpenAI, Anthropic, Apple Intelligence
 
 **Provider notes:**
 
-- **OpenAI `gpt-4o-mini`** is the recommended provider for now — best mood accuracy and personality adherence
-- **Local models** (phi4-mini, qwen) need more prompt engineering work for reliable mood tagging and persona maintenance
+- **OpenAI `gpt-4o-mini`** is the recommended provider — best mood accuracy and personality adherence
+- **Local models** (phi4-mini, qwen) need more prompt engineering work for reliable mood tagging
 - Local models run fully offline with zero cloud dependency via [Ollama](https://ollama.com)
 
 **What doesn't exist yet:**
@@ -77,7 +75,6 @@ PikoChan has a brain, a soul, and memory. She remembers who you are, has moods t
 - No terminal or browser control
 - No voice (STT/TTS)
 - No skills system
-- No semantic memory search (currently injects all memories oldest-first)
 
 ---
 
@@ -168,10 +165,12 @@ PikoChan is built in four layers, each with a clear responsibility:
 │              Layer 2: BRAIN                 │
 │  PikoBrain    — LLM orchestrator            │
 │  PikoSoul     — personality + mood system   │
-│  PikoMemory   — SQLite memory pipeline      │
+│  PikoMemory   — semantic memory pipeline     │
+│  PikoEmbedding — Arctic Embed XS (CoreML)   │
 │  PikoHTTPServer — HTTP gateway (port 7878)  │
 │  PikoGateway  — structured JSONL logging    │
-│  (v0.2.0 + v0.3.0 ✅)                       │
+│  SetupManager — first-time setup wizard     │
+│  (v0.2.0 + v0.3.0 + v0.3.5 ✅)              │
 ├─────────────────────────────────────────────┤
 │              Layer 3: HANDS                 │
 │  PikoTerminal     — terminal control        │
@@ -189,7 +188,7 @@ PikoChan is built in four layers, each with a clear responsibility:
 
 **Layer 1** is pure UI — the notch panel, animations, and state machine.
 
-**Layer 2** is the brain — multi-provider LLM orchestration (Ollama, OpenAI, Anthropic, Apple Intelligence), composable personality via `PikoSoul`, SQLite-backed memory with fact extraction, an HTTP gateway for headless access, and structured JSONL logging.
+**Layer 2** is the brain — multi-provider LLM orchestration (Ollama, OpenAI, Anthropic, Apple Intelligence), composable personality via `PikoSoul`, semantic memory with Arctic Embed XS embeddings and cosine similarity recall, an HTTP gateway for headless access, structured JSONL logging, and a first-time setup wizard.
 
 **Layer 3** is the hands — how PikoChan will interact with your Mac. Terminal commands, browser automation, screen reading, and a heartbeat loop for background awareness.
 
@@ -223,16 +222,17 @@ PikoChan has personality, emotions, memory, and an HTTP gateway.
 - **Structured logging**: `PikoGateway` JSONL logger with daily rolling, 7-day prune, 50MB cap
 - **Settings**: Soul tab for personality editing and memory management
 
-### v0.3.5 — Setup & Semantic Memory
+### v0.3.5 — Setup & Semantic Memory ✅
 
 First-time setup wizard and intelligent memory recall.
 
-- **In-notch setup wizard**: guided 5-step flow (welcome, provider, validation, memory engine, summary) with animations and typewriter text
-- **Provider validation**: Ollama reachability check, API key validation for OpenAI/Anthropic, Apple Intelligence availability
-- **Semantic memory search**: Apple NLEmbedding (built-in, zero dependencies) with model2vec fallback (~32MB). Replaces brute-force "inject all memories" with cosine similarity top-K recall via Accelerate.framework
-- **Memory vectors**: new `memory_vectors` SQLite table with embedding BLOBs, migration for existing v0.3.0 memories
-- **System checks**: SQLite, embedding model, gateway server, log directory — all validated with visual checklist
-- **Re-run support**: Settings → Soul → "Re-run Setup", version-aware step discovery for future upgrades
+- **In-notch setup wizard**: guided 5-step flow (welcome, provider, validation, memory engine, summary) with typewriter text and spring animations
+- **Provider validation**: Ollama reachability + model listing, API key validation for OpenAI/Anthropic, Apple Intelligence availability check
+- **Semantic memory**: Snowflake Arctic Embed XS (22M params, 384-dim, CoreML float32) replaces brute-force recall with cosine similarity top-K ranking via Accelerate.framework. Apple NLEmbedding fallback if CoreML model unavailable
+- **WordPiece tokenizer**: BERT-compatible subword tokenizer for Arctic model input (30522 vocab, max 128 tokens)
+- **Memory vectors**: `memory_vectors` SQLite table with BLOB storage, FK cascade, migration step in setup wizard
+- **System checks**: SQLite, embedding model, gateway server, log directory — validated with visual checklist
+- **Re-run support**: Settings → Soul → "Re-run Setup Wizard"
 
 ### v0.4.0 — Hands
 
@@ -290,9 +290,14 @@ Build and run (⌘R). PikoChan will appear in your notch. Hover below the notch 
 ```
 PikoChan/
 ├── PikoChanApp.swift              # Entry point, AppDelegate, brain injection wiring
+├── Assets/
+│   └── Models/
+│       ├── ArcticEmbedXS.mlpackage  # Snowflake Arctic Embed XS (384-dim, 22M params, CoreML)
+│       └── arctic_vocab.txt         # BERT WordPiece vocabulary (30522 tokens)
 ├── Core/
 │   ├── NotchManager.swift         # State machine, mouse monitors, panel management
-│   ├── NotchState.swift           # Five-state enum (hidden, hovered, expanded, typing, listening)
+│   ├── NotchState.swift           # Six-state enum (hidden, hovered, expanded, typing, listening, setup)
+│   ├── SetupManager.swift         # First-time setup wizard state + validation + migration
 │   ├── PikoSettings.swift         # Observable settings store backed by UserDefaults
 │   ├── PikoHTTPServer.swift       # NWListener HTTP server (port 7878), all API endpoints
 │   ├── SettingsWindowController.swift  # Native settings window with toolbar tabs
@@ -300,8 +305,8 @@ PikoChan/
 │       ├── PikoBrain.swift        # LLM orchestrator — multi-provider, streaming, history
 │       ├── PikoSoul.swift         # Personality YAML → system prompt + post-history reminder
 │       ├── MoodParser.swift       # Emotion tag parser ([playful], [snarky], etc.)
-│       ├── PikoMemory.swift       # Fact extraction + recall coordinator
-│       ├── PikoStore.swift        # SQLite (C API) — chat_history + memories tables
+│       ├── PikoMemory.swift       # Semantic recall (cosine similarity) + fact extraction
+│       ├── PikoStore.swift        # SQLite (C API) — chat_history, memories, memory_vectors
 │       ├── PikoGateway.swift      # Structured JSONL logger (daily rolling, 7-day prune)
 │       ├── PikoConfig.swift       # YAML config parser (provider, model, gateway port)
 │       ├── PikoConfigStore.swift  # Observable config binding for settings UI
@@ -313,9 +318,17 @@ PikoChan/
 │   ├── ListeningView.swift        # Voice input state with waveform
 │   ├── WaveView.swift             # 60fps Canvas waveform animation
 │   ├── NotchShape.swift           # Custom animatable notch clip shape
+│   ├── Setup/
+│   │   ├── SetupView.swift        # Root setup container with step routing
+│   │   ├── SetupComponents.swift  # StepDots, NavButtons, ActionButton, TypewriterText
+│   │   ├── SetupWelcomeStep.swift # Typewriter greeting + Begin Setup
+│   │   ├── SetupProviderStep.swift      # Provider picker (4 pills)
+│   │   ├── SetupProviderConfigStep.swift  # API key / Ollama validation
+│   │   ├── SetupMemoryStep.swift  # Embedding check + memory migration
+│   │   └── SetupSummaryStep.swift # Checklist + Let's go!
 │   └── Settings/
 │       ├── AIModelTab.swift       # Provider picker, model config, connection test
-│       ├── SoulTab.swift          # Personality editing + memory management
+│       ├── SoulTab.swift          # Personality editing + memory management + re-run setup
 │       ├── AppearanceTab.swift
 │       ├── BehaviorTab.swift
 │       ├── NotchTuneTab.swift
@@ -323,7 +336,9 @@ PikoChan/
 └── Utilities/
     ├── PikoPanel.swift            # NSPanel subclass with activation state sync
     ├── PikoKeychain.swift         # macOS Keychain wrapper for API keys
-    ├── PikoTextField.swift        # NSViewRepresentable text field (avoids ViewBridge bugs)
+    ├── PikoTextField.swift        # NSViewRepresentable text fields (plain + bullet-masked secure)
+    ├── PikoEmbedding.swift        # Arctic Embed XS (CoreML) + NLEmbedding fallback
+    ├── WordPieceTokenizer.swift   # BERT WordPiece tokenizer for Arctic model
     ├── NSScreen+Notch.swift       # Notch geometry detection
     └── VisualEffectView.swift     # NSVisualEffectView wrapper
 ```
@@ -358,8 +373,12 @@ Everything is human-readable, git-friendly, and portable. Copy the folder to a n
 | LLM (local) | Ollama HTTP API | Any Ollama-compatible model |
 | LLM (cloud) | OpenAI / Anthropic APIs | API keys stored in macOS Keychain |
 | LLM (on-device) | Apple FoundationModels | macOS 26+ experimental |
+| Embeddings | Snowflake Arctic Embed XS (CoreML) | 384-dim, 22M params, on-device |
+| Embedding fallback | Apple NLEmbedding | 512-dim, built-in, lower quality |
+| Tokenizer | WordPiece (BERT-compatible) | 30522 vocab, max 128 tokens |
+| Similarity | Accelerate.framework (vDSP) | Hardware-accelerated cosine similarity |
 | HTTP Server | Network.framework (NWListener) | Zero-dependency TCP server |
-| Database | SQLite (C API) | Chat history + memory storage |
+| Database | SQLite (C API) | Chat history, memories, embedding vectors |
 | Logging | Custom JSONL | Rolling daily, auto-prune |
 
 ---

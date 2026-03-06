@@ -16,6 +16,7 @@ final class PikoConfigStore {
     var anthropicModel: String = "claude-3-5-haiku-latest"
     var openAIAPIKey: String = ""
     var anthropicAPIKey: String = ""
+    var setupComplete: Bool = false
 
     private init() {
         do {
@@ -38,6 +39,7 @@ final class PikoConfigStore {
         // API keys come from Keychain, not YAML.
         openAIAPIKey = PikoKeychain.load(account: "openai_api_key") ?? ""
         anthropicAPIKey = PikoKeychain.load(account: "anthropic_api_key") ?? ""
+        setupComplete = cfg.setupComplete
     }
 
     func save() throws {
@@ -51,6 +53,7 @@ local_endpoint: \(localEndpoint.trimmingCharacters(in: .whitespacesAndNewlines))
 cloud_fallback: \(cloudFallback.rawValue)
 openai_model: \(openAIModel.trimmingCharacters(in: .whitespacesAndNewlines))
 anthropic_model: \(anthropicModel.trimmingCharacters(in: .whitespacesAndNewlines))
+setup_complete: \(setupComplete ? "true" : "false")
 """
 
         try yaml.write(to: home.configFile, atomically: true, encoding: .utf8)
@@ -70,6 +73,11 @@ anthropic_model: \(anthropicModel.trimmingCharacters(in: .whitespacesAndNewlines
         } else {
             PikoKeychain.save(account: "anthropic_api_key", value: trimmedAnthropic)
         }
+    }
+
+    func markSetupComplete() throws {
+        setupComplete = true
+        try save()
     }
 
     /// Migrate API keys from config.yaml to Keychain on first run after update.
@@ -92,6 +100,7 @@ local_endpoint: \(cfg.localEndpoint.absoluteString)
 cloud_fallback: \(cfg.cloudFallback.rawValue)
 openai_model: \(cfg.openAIModel)
 anthropic_model: \(cfg.anthropicModel)
+setup_complete: \(cfg.setupComplete ? "true" : "false")
 """
             try? yaml.write(to: home.configFile, atomically: true, encoding: .utf8)
         }

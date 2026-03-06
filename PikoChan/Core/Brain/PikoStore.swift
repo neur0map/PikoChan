@@ -13,6 +13,8 @@ final class PikoStore {
             db = nil
             return nil
         }
+        // Enable FK enforcement so ON DELETE CASCADE works for memory_vectors.
+        execute("PRAGMA foreign_keys = ON;")
         createTables()
     }
 
@@ -42,6 +44,16 @@ final class PikoStore {
                 source_turn_id INTEGER,
                 created_at REAL NOT NULL,
                 last_recalled REAL
+            );
+        """)
+
+        execute("""
+            CREATE TABLE IF NOT EXISTS memory_vectors (
+                memory_id INTEGER PRIMARY KEY,
+                vector BLOB NOT NULL,
+                embedder TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
             );
         """)
     }
@@ -111,13 +123,14 @@ final class PikoStore {
 
     // MARK: - Memories
 
-    func saveMemory(fact: String, turnId: Int?) {
+    @discardableResult
+    func saveMemory(fact: String, turnId: Int?) -> Int? {
         let sql = """
             INSERT INTO memories (fact, source_turn_id, created_at)
             VALUES (?, ?, ?);
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_text(stmt, 1, (fact as NSString).utf8String, -1, nil)
@@ -128,7 +141,8 @@ final class PikoStore {
         }
         sqlite3_bind_double(stmt, 3, Date.now.timeIntervalSince1970)
 
-        sqlite3_step(stmt)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { return nil }
+        return Int(sqlite3_last_insert_rowid(db))
     }
 
     /// Returns all memories sorted by temporal decay (newest first), up to limit.
@@ -204,8 +218,85 @@ final class PikoStore {
     }
 
     func clearAll() {
+        execute("DELETE FROM memory_vectors;")
         execute("DELETE FROM chat_history;")
         execute("DELETE FROM memories;")
+    }
+
+    // MARK: - Memory Vectors
+
+    func saveVector(memoryId: Int, vector: [Double], embedder: String) {
+        let sql = "INSERT OR REPLACE INTO memory_vectors (memory_id, vector, embedder, created_at) VALUES (?, ?, ?, ?);"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_int(stmt, 1, Int32(memoryId))
+        // SQLITE_TRANSIENT (-1 cast) tells SQLite to copy the blob immediately,
+        // so the pointer doesn't need to outlive this call.
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        let data = vector.withUnsafeBufferPointer { Data(buffer: $0) }
+        _ = data.withUnsafeBytes { ptr in
+            sqlite3_bind_blob(stmt, 2, ptr.baseAddress, Int32(data.count), transient)
+        }
+        sqlite3_bind_text(stmt, 3, (embedder as NSString).utf8String, -1, nil)
+        sqlite3_bind_double(stmt, 4, Date.now.timeIntervalSince1970)
+        sqlite3_step(stmt)
+    }
+
+    func allMemoryVectors() -> [(id: Int, fact: String, vector: [Double])] {
+        let sql = """
+            SELECT m.id, m.fact, v.vector
+            FROM memories m
+            INNER JOIN memory_vectors v ON v.memory_id = m.id;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var results: [(id: Int, fact: String, vector: [Double])] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = Int(sqlite3_column_int(stmt, 0))
+            let fact = String(cString: sqlite3_column_text(stmt, 1))
+            let blobPtr = sqlite3_column_blob(stmt, 2)
+            let blobSize = Int(sqlite3_column_bytes(stmt, 2))
+            let doubleCount = blobSize / MemoryLayout<Double>.size
+            guard let blobPtr, doubleCount > 0 else { continue }
+            let vector = Array(UnsafeBufferPointer(
+                start: blobPtr.assumingMemoryBound(to: Double.self),
+                count: doubleCount
+            ))
+            results.append((id: id, fact: fact, vector: vector))
+        }
+        return results
+    }
+
+    func memoriesWithoutVectors() -> [(id: Int, fact: String)] {
+        let sql = """
+            SELECT m.id, m.fact FROM memories m
+            LEFT JOIN memory_vectors v ON v.memory_id = m.id
+            WHERE v.memory_id IS NULL;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var results: [(id: Int, fact: String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = Int(sqlite3_column_int(stmt, 0))
+            let fact = String(cString: sqlite3_column_text(stmt, 1))
+            results.append((id: id, fact: fact))
+        }
+        return results
+    }
+
+    func vectorCount() -> Int {
+        let sql = "SELECT COUNT(*) FROM memory_vectors;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int(stmt, 0))
     }
 
     // MARK: - Helpers

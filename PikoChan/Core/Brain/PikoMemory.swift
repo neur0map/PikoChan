@@ -5,15 +5,35 @@ struct PikoMemory {
 
     // MARK: - Recall
 
-    /// Returns all stored memories (up to limit), scored by temporal decay.
-    /// Keyword filtering was too rigid for small models — just inject everything.
-    /// With few memories (<50) this is cheap and much more reliable.
+    /// Returns semantically relevant memories using embedding cosine similarity.
+    /// Uses Arctic Embed XS (384-dim, retrieval-optimized) with NLEmbedding fallback.
+    /// Falls back to brute-force injection if no embedding is available.
     func recallRelevant(for prompt: String, from store: PikoStore?) -> [String] {
         guard let store else { return [] }
-        // Fetch all memories and return oldest-first so core identity facts
-        // (name, city, birthday) get priority over recent conversational noise.
-        let all = store.recentMemories(limit: 200) // newest-first from DB
-        return all.reversed() // oldest-first → core facts first
+        if PikoEmbedding.isAvailable, let promptVec = PikoEmbedding.embedQuery(prompt) {
+            let allVectors = store.allMemoryVectors()
+            guard !allVectors.isEmpty else { return fallbackRecall(from: store) }
+            let ranked = allVectors
+                .map { ($0.fact, PikoEmbedding.cosineSimilarity(promptVec, $0.vector)) }
+                .sorted { $0.1 > $1.1 }
+                .prefix(15)
+                .map { $0.0 }
+            // If not all memories are vectorized, supplement with unvectorized ones.
+            let unvectorized = store.memoriesWithoutVectors()
+            if unvectorized.isEmpty { return Array(ranked) }
+            let rankedSet = Set(ranked)
+            let extras = unvectorized
+                .suffix(10)
+                .map { $0.fact }
+                .filter { !rankedSet.contains($0) }
+            return Array(ranked) + extras
+        }
+        return fallbackRecall(from: store)
+    }
+
+    /// All memories oldest-first — used when embedding is unavailable.
+    private func fallbackRecall(from store: PikoStore) -> [String] {
+        store.recentMemories(limit: 200).reversed()
     }
 
     // MARK: - Extraction
@@ -38,8 +58,12 @@ struct PikoMemory {
             let response = try await brain.respondInternal(to: extractionPrompt)
             let facts = parseFactsJSON(response)
             for fact in facts {
-                store.saveMemory(fact: fact, turnId: turnId)
-                PikoGateway.shared.logMemorySave(fact: fact, turnId: turnId)
+                if let memoryId = store.saveMemory(fact: fact, turnId: turnId) {
+                    PikoGateway.shared.logMemorySave(fact: fact, turnId: turnId)
+                    if PikoEmbedding.isAvailable, let vec = PikoEmbedding.embed(fact) {
+                        store.saveVector(memoryId: memoryId, vector: vec, embedder: PikoEmbedding.activeEmbedder.rawValue)
+                    }
+                }
             }
             if !facts.isEmpty {
                 PikoGateway.shared.logMemoryExtract(userMessage: turn.user, facts: facts)

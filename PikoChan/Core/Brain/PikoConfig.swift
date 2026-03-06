@@ -23,6 +23,7 @@ struct PikoConfig {
     var openAIAPIKey: String?
     var anthropicAPIKey: String?
     var gatewayPort: UInt16
+    var setupComplete: Bool
 
     static let `default` = PikoConfig(
         provider: .local,
@@ -33,7 +34,8 @@ struct PikoConfig {
         anthropicModel: "claude-3-5-haiku-latest",
         openAIAPIKey: nil,
         anthropicAPIKey: nil,
-        gatewayPort: 7878
+        gatewayPort: 7878,
+        setupComplete: false
     )
 }
 
@@ -61,6 +63,8 @@ enum PikoConfigLoader {
             return PikoConfig.default.gatewayPort
         }()
 
+        let setupComplete = (map["setup_complete"] ?? "") == "true"
+
         return PikoConfig(
             provider: provider,
             localModel: localModel,
@@ -70,7 +74,8 @@ enum PikoConfigLoader {
             anthropicModel: anthropicModel,
             openAIAPIKey: openAIAPIKey,
             anthropicAPIKey: anthropicAPIKey,
-            gatewayPort: gatewayPort
+            gatewayPort: gatewayPort,
+            setupComplete: setupComplete
         )
     }
 

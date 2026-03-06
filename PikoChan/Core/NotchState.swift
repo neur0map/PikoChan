@@ -12,4 +12,6 @@ enum NotchState: Equatable {
     case typing
     /// Voice listening — sprite with animated waves underneath.
     case listening
+    /// First-time setup wizard — step state lives in SetupManager.
+    case setup
 }

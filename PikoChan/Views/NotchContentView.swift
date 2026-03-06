@@ -12,9 +12,7 @@ struct NotchContentView: View {
         switch manager.state {
         case .hidden:    6
         case .hovered:   8
-        case .expanded:  15
-        case .typing:    15
-        case .listening: 15
+        case .expanded, .typing, .listening, .setup: 15
         }
     }
 
@@ -22,9 +20,7 @@ struct NotchContentView: View {
         switch manager.state {
         case .hidden:    10
         case .hovered:   12
-        case .expanded:  24
-        case .typing:    24
-        case .listening: 24
+        case .expanded, .typing, .listening, .setup: 24
         }
     }
 
@@ -32,7 +28,7 @@ struct NotchContentView: View {
         switch manager.state {
         case .hidden:    manager.notchSize.width
         case .hovered:   manager.notchSize.width
-        case .expanded, .typing, .listening:
+        case .expanded, .typing, .listening, .setup:
             manager.activeContentWidth
         }
     }
@@ -44,6 +40,8 @@ struct NotchContentView: View {
         case .hovered:   manager.notchSize.height + pad + 12
         case .expanded, .typing, .listening:
             manager.activeContentHeight
+        case .setup:
+            manager.setupContentHeight
         }
     }
 
@@ -172,6 +170,18 @@ struct NotchContentView: View {
                     }
                 }
                 .padding(.top, manager.notchSize.height + settings.contentPadding + activeVerticalOffset(for: manager.state))
+            }
+
+            // ── Setup Wizard ──
+            if manager.state == .setup, let setupManager = manager.setupManager {
+                SetupView(manager: manager, setup: setupManager)
+                    .padding(.top, manager.notchSize.height + settings.contentPadding)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)),
+                            removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
+                        )
+                    )
             }
 
             // ── Hover peek indicator ──

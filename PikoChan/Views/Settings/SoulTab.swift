@@ -23,6 +23,7 @@ struct SoulTab: View {
             moodSection
             memorySection
             logsSection
+            setupSection
         }
         .formStyle(.grouped)
         .frame(width: 440, height: 580)
@@ -140,6 +141,23 @@ struct SoulTab: View {
             }
 
             Text("Logs track every message, response, mood change, memory operation, and error as structured JSONL.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Setup
+
+    @ViewBuilder
+    private var setupSection: some View {
+        Section("Setup Wizard") {
+            Button("Re-run Setup Wizard") {
+                // Close settings window first, then trigger setup.
+                NSApp.keyWindow?.close()
+                NotificationCenter.default.post(name: .pikoRerunSetup, object: nil)
+            }
+
+            Text("Re-runs the first-time setup to reconfigure your AI provider and re-index memories.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

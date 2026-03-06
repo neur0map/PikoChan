@@ -303,14 +303,16 @@ All files are:
 - [x] SoulTab: Settings UI for personality editing + memory management
 - [x] Brain injection: PikoBrain shared between NotchManager and HTTPServer via AppDelegate
 
-### v0.3.5 — Setup & Semantic Memory
-- [ ] In-notch first-time setup wizard (5 steps: welcome, provider, validation, memory, summary)
-- [ ] Provider validation checks (Ollama ping, API key validation, Apple Intelligence availability)
-- [ ] PikoEmbedding: Apple NLEmbedding (primary) + model2vec fallback (~32MB download)
-- [ ] memory_vectors SQLite table + migration for existing v0.3.0 memories
-- [ ] Semantic recall: cosine similarity top-K via Accelerate.framework
-- [ ] SetupManager + SetupView with animated step transitions
-- [ ] Re-run setup from Settings, version-aware step discovery
+### v0.3.5 — Setup & Semantic Memory ✅ (completed 2026-03-06)
+- [x] In-notch first-time setup wizard (5 steps: welcome, provider, providerConfig, memory, summary) — `SetupManager` + 7 new view files
+- [x] Provider validation checks — Ollama ping + model list, API key validation for OpenAI/Anthropic, Apple Intelligence availability
+- [x] PikoEmbedding: Snowflake Arctic Embed XS (384-dim CoreML, 86MB) primary + Apple NLEmbedding fallback — pivot from NLEmbedding after benchmarking proved 0.19 cosine similarity for retrieval (Arctic scores 0.5-0.7)
+- [x] `memory_vectors` SQLite table (BLOB storage, FK cascade) + migration step in setup wizard
+- [x] Semantic recall: asymmetric query embedding + cosine similarity top-K via Accelerate.framework, hybrid unvectorized supplement
+- [x] `WordPieceTokenizer`: minimal BERT tokenizer for Arctic model (30522 vocab, max 128 tokens)
+- [x] SetupManager + SetupView with animated step transitions (horizontal slide, spring 0.45/0.72)
+- [x] Re-run setup from Settings → Soul → "Re-run Setup Wizard"
+- [x] `PikoSecureField`: bullet-masking NSTextField for API key input in .screenSaver-level panels
 
 ### v0.4.0 — Hands
 - [ ] PikoTerminal: detect running terminals, type commands via AppleScript
