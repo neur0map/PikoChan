@@ -186,12 +186,12 @@ struct NotchContentView: View {
                 .transition(.opacity.combined(with: .offset(y: -4)))
             }
         }
+        // Fixed frame — never animated on content changes to avoid
+        // constraint loops in NSHostingView (FB16484811-adjacent).
         .frame(width: contentWidth, height: contentHeight)
-        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: showsResponseBubble)
         .clipShape(NotchShape(topCornerRadius: topRadius, bottomCornerRadius: bottomRadius))
         .shadow(color: .black.opacity(shadowOpacity), radius: 20, y: 10)
         .onHover { hovering in
-            // SwiftUI-native hover detection (works when ignoresMouseEvents=false).
             if hovering && manager.state == .hidden {
                 manager.transition(to: .hovered)
             } else if !hovering && manager.state == .hovered {
@@ -199,6 +199,8 @@ struct NotchContentView: View {
             }
         }
     }
+
+    // MARK: - Response Bubble
 
     private var responseBubble: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -228,14 +230,15 @@ struct NotchContentView: View {
                     }
                 }
             } else if manager.isResponseExpanded {
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: false) {
                     Text(manager.lastResponseText)
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.9))
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxHeight: 200)
+                .frame(height: 180)
             } else {
                 Text(manager.lastResponseText)
                     .font(.system(size: 12))
@@ -251,6 +254,9 @@ struct NotchContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Fixed height prevents content-driven relayout loops.
+        .frame(height: manager.isResponseExpanded ? 200 : 62)
+        .clipped()
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
@@ -267,11 +273,11 @@ struct NotchContentView: View {
                     .padding(6)
             }
         }
+        .contentShape(Rectangle())
         .onTapGesture {
-            if manager.lastResponseError == nil && !manager.lastResponseText.isEmpty {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    manager.isResponseExpanded.toggle()
-                }
+            if manager.lastResponseError == nil && !manager.lastResponseText.isEmpty && !manager.isResponding {
+                manager.isResponseExpanded.toggle()
+                manager.updateVisibleContentRect()
             }
         }
     }
@@ -279,24 +285,30 @@ struct NotchContentView: View {
 
 // MARK: - Thinking Dots Animation
 
+/// Uses a phase-based animation instead of a Timer to avoid layout-loop
+/// issues in NSHostingView. The phaseAnimator drives opacity changes
+/// without triggering constraint recalculations.
 private struct ThinkingDotsView: View {
-    @State private var phase = 0
+    @State private var animating = false
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(0..<3) { i in
+            ForEach(0..<3, id: \.self) { i in
                 Circle()
-                    .fill(.blue.opacity(phase == i ? 0.9 : 0.3))
+                    .fill(.blue)
                     .frame(width: 6, height: 6)
+                    .opacity(animating ? dotOpacity(for: i) : 0.3)
             }
         }
-        .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    phase = (phase + 1) % 3
-                }
-            }
-        }
+        .onAppear { animating = true }
+        .animation(
+            .easeInOut(duration: 0.6).repeatForever(autoreverses: true).delay(Double.random(in: 0...0.3)),
+            value: animating
+        )
+    }
+
+    private func dotOpacity(for index: Int) -> Double {
+        [0.9, 0.5, 0.2][index % 3]
     }
 }
 
