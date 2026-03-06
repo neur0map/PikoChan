@@ -326,6 +326,13 @@ All files are:
 - [x] Settings window title fix — NSTabViewController `.toolbar` style title propagation
 - [x] Dynamic scrolling — SoulTab Form scrolls naturally within window instead of fixed-height clipping
 
+### v0.3.7 — Path Guard ✅ (completed 2026-03-06)
+- [x] `PikoPathGuard` — OpenClaw-inspired filesystem guardrails with path containment, symlink resolution, and human-readable denial reasons
+- [x] Access tiers: `~/.pikochan/` read-write, user dirs read-only, code/app bundles/system denied
+- [x] Dangerous path detection — blocks `.swift`, `.app`, `.xcodeproj`, `DerivedData`, `.git`, `~/Library/`, system paths
+- [x] Self-awareness injection — `PikoPathGuard.selfAwareness` in system prompt so PikoChan knows her own boundaries
+- [x] Foundation for v0.4.0 Hands — every future file operation routes through `PikoPathGuard.check()`
+
 ### v0.4.0 — Hands
 - [ ] PikoTerminal: detect running terminals, type commands via AppleScript
 - [ ] PikoBrowser: open URLs, basic Chrome/Safari control
