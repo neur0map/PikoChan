@@ -283,12 +283,13 @@ All files are:
 
 ## Implementation Phases
 
-### v0.2.0 — Brain Foundation
-- [ ] `~/.pikochan/` directory structure + config loading
-- [ ] PikoBrain: MLX Swift integration, load a small model (Phi-3.5 mini or Qwen2.5 3B)
-- [ ] Basic chat: type in notch → get response from local LLM
-- [ ] Cloud API fallback (OpenAI/Anthropic) when configured
-- [ ] Response displayed in notch UI (new "response" state or bubble)
+### v0.2.0 — Brain Foundation ✅ (completed 2026-03-05)
+- [x] `~/.pikochan/` directory structure + config loading — `PikoHome.swift` bootstraps full directory tree, `PikoConfig.swift` parses YAML, `PikoConfigStore.swift` provides reactive UI binding
+- [x] PikoBrain: local LLM integration — uses Apple FoundationModels (macOS 26+) as primary, Ollama-compatible HTTP endpoint as fallback (pragmatic pivot from MLX Swift; MLX integration deferred to future release)
+- [x] Basic chat: type in notch → get response from local LLM — full async flow: `TypingView` → `NotchManager.submitTextInput()` → `PikoBrain.respond(to:)` → response bubble
+- [x] Cloud API fallback (OpenAI/Anthropic) when configured — both providers fully wired with API key management, model selection, and automatic fallback from local → cloud
+- [x] Response displayed in notch UI (response bubble) — animated bubble overlay in expanded/typing/listening states with "Thinking...", error, and response display
+- [x] Settings UI for AI model configuration — `AIModelTab.swift` with provider picker, local/cloud config, API key fields, save/reload
 
 ### v0.3.0 — Soul & Memory
 - [ ] PikoSoul: personality.yaml loading + system prompt construction
