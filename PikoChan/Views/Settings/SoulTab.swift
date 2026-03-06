@@ -26,7 +26,7 @@ struct SoulTab: View {
             setupSection
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 580)
+        .frame(width: 440, height: 660)
         .onAppear { load() }
     }
 

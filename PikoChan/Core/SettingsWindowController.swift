@@ -52,7 +52,7 @@ final class SettingsWindowController {
 
         let w = NSWindow(contentViewController: tabVC)
         w.title = "PikoChan Settings"
-        w.styleMask = [.titled, .closable]
+        w.styleMask = [.titled, .closable, .resizable]
         w.isReleasedWhenClosed = false
         // Float above the notch panel (.screenSaver = 1000).
         w.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)) + 1)
