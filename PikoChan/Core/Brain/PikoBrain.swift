@@ -7,6 +7,14 @@ struct ChatTurn {
     let user: String
     let assistant: String
     let at: Date
+    let mood: String?
+
+    init(user: String, assistant: String, at: Date, mood: String? = nil) {
+        self.user = user
+        self.assistant = assistant
+        self.at = at
+        self.mood = mood
+    }
 }
 
 // MARK: - Codable Response Types
@@ -18,6 +26,20 @@ private struct OllamaResponse: Codable {
 private struct OllamaStreamChunk: Codable {
     let response: String
     let done: Bool
+}
+
+private struct OllamaChatResponse: Codable {
+    let message: OllamaChatMessage
+}
+
+private struct OllamaChatStreamChunk: Codable {
+    let message: OllamaChatMessage
+    let done: Bool
+}
+
+private struct OllamaChatMessage: Codable {
+    let role: String
+    let content: String
 }
 
 private struct OpenAIResponse: Codable {
@@ -68,9 +90,12 @@ private struct APIErrorResponse: Codable {
 
 @MainActor
 final class PikoBrain {
-    private let home: PikoHome
+    let home: PikoHome
     private(set) var config: PikoConfig
+    private(set) var soul: PikoSoul
     private(set) var history: [ChatTurn] = []
+    private(set) var store: PikoStore?
+    private let memory = PikoMemory()
 
     static let maxHistoryTurns = 50
     static let contextWindowTurns = 20
@@ -85,59 +110,112 @@ final class PikoBrain {
     init() {
         self.home = PikoHome()
         self.config = .default
+        self.soul = .default
     }
 
     init(home: PikoHome) {
         self.home = home
         self.config = .default
+        self.soul = .default
     }
+
+    private let gateway = PikoGateway.shared
 
     func bootstrap() throws {
         try home.bootstrap()
+        gateway.configure(logsDir: home.logsDir)
         reloadConfig()
+        store = PikoStore(path: home.memoryDBFile)
+        if let store {
+            history = store.recentTurns(limit: Self.maxHistoryTurns)
+        }
+        gateway.logBoot(
+            provider: config.provider.rawValue,
+            model: activeModelName,
+            historyCount: history.count,
+            memoryCount: store?.memoryCount() ?? 0
+        )
     }
 
     func reloadConfig() {
         config = PikoConfigLoader.load(from: home.configFile)
+        soul = PikoSoul.load(from: home.personalityFile)
+        gateway.logConfigReload(provider: config.provider.rawValue, model: activeModelName)
     }
 
     // MARK: - Full Response (non-streaming)
 
-    func respond(to prompt: String) async throws -> String {
+    /// Internal-only flag combo: `skipHistory` + `skipMemoryExtraction` lets
+    /// memory-extraction calls use the LLM without polluting chat history.
+    func respond(
+        to prompt: String,
+        mood: NotchManager.Mood = .neutral,
+        skipMemoryExtraction: Bool = false,
+        skipHistory: Bool = false
+    ) async throws -> String {
         let clean = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return "" }
 
+        let start = Date.now
         let response: String
-        switch config.provider {
-        case .local:
-            do {
-                response = try await localGenerate(prompt: clean)
-            } catch {
-                if let fallback = try await cloudFallbackResponse(prompt: clean) {
-                    appendHistory(user: clean, assistant: fallback)
-                    return fallback
+        do {
+            switch config.provider {
+            case .local:
+                do {
+                    response = try await localGenerate(prompt: clean, mood: mood)
+                } catch {
+                    if let fallback = try await cloudFallbackResponse(prompt: clean, mood: mood) {
+                        if !skipHistory {
+                            appendHistory(user: clean, assistant: fallback, mood: mood.rawValue, extractMemory: !skipMemoryExtraction)
+                        }
+                        return fallback
+                    }
+                    throw error
                 }
-                throw error
+            case .openai:
+                guard let key = config.openAIAPIKey, !key.isEmpty else {
+                    throw PikoBrainError.missingCloudCredentials("No API key configured")
+                }
+                response = try await openAIGenerate(prompt: clean, apiKey: key, model: config.openAIModel, mood: mood)
+            case .anthropic:
+                guard let key = config.anthropicAPIKey, !key.isEmpty else {
+                    throw PikoBrainError.missingCloudCredentials("No API key configured")
+                }
+                response = try await anthropicGenerate(prompt: clean, apiKey: key, model: config.anthropicModel, mood: mood)
+            case .apple:
+                guard let text = await generateWithFoundationModels(prompt: clean, mood: mood), !text.isEmpty else {
+                    throw PikoBrainError.appleIntelligenceUnavailable
+                }
+                response = text
             }
-        case .openai:
-            guard let key = config.openAIAPIKey, !key.isEmpty else {
-                throw PikoBrainError.missingCloudCredentials("No API key configured")
-            }
-            response = try await openAIGenerate(prompt: clean, apiKey: key, model: config.openAIModel)
-        case .anthropic:
-            guard let key = config.anthropicAPIKey, !key.isEmpty else {
-                throw PikoBrainError.missingCloudCredentials("No API key configured")
-            }
-            response = try await anthropicGenerate(prompt: clean, apiKey: key, model: config.anthropicModel)
+        } catch {
+            gateway.logError(
+                message: error.localizedDescription,
+                subsystem: .brain,
+                detail: "prompt=\(String(clean.prefix(200)))"
+            )
+            throw error
         }
 
-        appendHistory(user: clean, assistant: response)
+        let durationMs = Int(Date.now.timeIntervalSince(start) * 1000)
+        gateway.logAssistantResponse(
+            message: response,
+            provider: config.provider.rawValue,
+            model: activeModelName,
+            mood: mood.rawValue,
+            durationMs: durationMs,
+            streaming: false
+        )
+
+        if !skipHistory {
+            appendHistory(user: clean, assistant: response, mood: mood.rawValue, extractMemory: !skipMemoryExtraction)
+        }
         return response
     }
 
     // MARK: - Streaming Response
 
-    func respondStreaming(to prompt: String) -> AsyncStream<String> {
+    func respondStreaming(to prompt: String, mood: NotchManager.Mood = .neutral) -> AsyncStream<String> {
         let clean = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else {
             return AsyncStream { $0.finish() }
@@ -146,12 +224,14 @@ final class PikoBrain {
         let cfg = config
         return AsyncStream { continuation in
             Task {
+                let streamStart = Date.now
+                self.gateway.logStreamStart(provider: cfg.provider.rawValue, model: self.activeModelName)
                 var fullResponse = ""
                 do {
                     switch cfg.provider {
                     case .local:
                         do {
-                            for try await chunk in self.localStreamGenerate(prompt: clean) {
+                            for try await chunk in self.localStreamGenerate(prompt: clean, mood: mood) {
                                 try Task.checkCancellation()
                                 fullResponse += chunk
                                 continuation.yield(chunk)
@@ -162,7 +242,7 @@ final class PikoBrain {
                             if let key = cfg.openAIAPIKey ?? cfg.anthropicAPIKey,
                                !key.isEmpty,
                                cfg.cloudFallback != .none {
-                                let fallback = try await self.cloudFallbackResponse(prompt: clean)
+                                let fallback = try await self.cloudFallbackResponse(prompt: clean, mood: mood)
                                 if let fallback {
                                     fullResponse = fallback
                                     continuation.yield(fallback)
@@ -177,7 +257,7 @@ final class PikoBrain {
                         guard let key = cfg.openAIAPIKey, !key.isEmpty else {
                             throw PikoBrainError.missingCloudCredentials("No API key configured")
                         }
-                        for try await chunk in self.openAIStreamGenerate(prompt: clean, apiKey: key, model: cfg.openAIModel) {
+                        for try await chunk in self.openAIStreamGenerate(prompt: clean, apiKey: key, model: cfg.openAIModel, mood: mood) {
                             try Task.checkCancellation()
                             fullResponse += chunk
                             continuation.yield(chunk)
@@ -186,25 +266,50 @@ final class PikoBrain {
                         guard let key = cfg.anthropicAPIKey, !key.isEmpty else {
                             throw PikoBrainError.missingCloudCredentials("No API key configured")
                         }
-                        for try await chunk in self.anthropicStreamGenerate(prompt: clean, apiKey: key, model: cfg.anthropicModel) {
+                        for try await chunk in self.anthropicStreamGenerate(prompt: clean, apiKey: key, model: cfg.anthropicModel, mood: mood) {
                             try Task.checkCancellation()
                             fullResponse += chunk
                             continuation.yield(chunk)
                         }
+                    case .apple:
+                        guard let text = await self.generateWithFoundationModels(prompt: clean, mood: mood), !text.isEmpty else {
+                            throw PikoBrainError.appleIntelligenceUnavailable
+                        }
+                        // Simulate streaming character-by-character.
+                        for char in text {
+                            try Task.checkCancellation()
+                            let s = String(char)
+                            fullResponse += s
+                            continuation.yield(s)
+                            try await Task.sleep(for: .milliseconds(15))
+                        }
                     }
 
                     if !fullResponse.isEmpty {
+                        let (parsedMood, cleanForHistory) = MoodParser.parse(from: fullResponse)
+                        let durationMs = Int(Date.now.timeIntervalSince(streamStart) * 1000)
+                        self.gateway.logStreamEnd(
+                            charCount: fullResponse.count,
+                            durationMs: durationMs,
+                            mood: parsedMood?.rawValue
+                        )
                         await MainActor.run {
-                            self.appendHistory(user: clean, assistant: fullResponse)
+                            self.appendHistory(user: clean, assistant: cleanForHistory, mood: mood.rawValue)
                         }
                     }
                 } catch is CancellationError {
                     if !fullResponse.isEmpty {
+                        let (_, cleanForHistory) = MoodParser.parse(from: fullResponse)
                         await MainActor.run {
-                            self.appendHistory(user: clean, assistant: fullResponse)
+                            self.appendHistory(user: clean, assistant: cleanForHistory, mood: mood.rawValue)
                         }
                     }
                 } catch {
+                    self.gateway.logError(
+                        message: error.localizedDescription,
+                        subsystem: .brain,
+                        detail: "streaming prompt=\(String(clean.prefix(200)))"
+                    )
                     continuation.yield("\n\n[Error: \(error.localizedDescription)]")
                 }
                 continuation.finish()
@@ -214,73 +319,253 @@ final class PikoBrain {
 
     // MARK: - History Management
 
-    private func appendHistory(user: String, assistant: String) {
-        history.append(ChatTurn(user: user, assistant: assistant, at: .now))
+    private func appendHistory(user: String, assistant: String, mood: String? = nil, extractMemory: Bool = true) {
+        let turn = ChatTurn(user: user, assistant: assistant, at: .now, mood: mood)
+        history.append(turn)
         if history.count > Self.maxHistoryTurns {
             history.removeFirst(history.count - Self.maxHistoryTurns)
         }
+
+        let turnId = store?.save(
+            turn: turn,
+            mood: mood ?? "neutral",
+            provider: config.provider.rawValue,
+            model: activeModelName
+        )
+
+        // Fire-and-forget memory extraction (skipped for internal extraction calls).
+        guard extractMemory else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.memory.extractAndStore(from: turn, turnId: turnId, using: self)
+        }
+    }
+
+    private var activeModelName: String {
+        switch config.provider {
+        case .local:     config.localModel
+        case .openai:    config.openAIModel
+        case .anthropic: config.anthropicModel
+        case .apple:     "apple-intelligence"
+        }
+    }
+
+    // MARK: - Context Messages
+
+    /// Max characters for history context (system prompt excluded).
+    /// Keeps total context safe for small models (4K-8K token windows).
+    static let maxContextChars = 6000
+
+    /// Builds a chat messages array from recent history + the current prompt.
+    /// Used by OpenAI, Anthropic, and Ollama chat endpoints.
+    private func contextMessages(for prompt: String, mood: NotchManager.Mood = .neutral) -> [[String: String]] {
+        let recalled = memory.recallRelevant(for: prompt, from: store)
+        if !recalled.isEmpty {
+            gateway.logMemoryRecall(query: prompt, recalled: recalled)
+        }
+        let systemContent = soul.systemPrompt(mood: mood, memories: recalled)
+
+        var messages: [[String: String]] = [
+            ["role": "system", "content": systemContent],
+        ]
+
+        // Budget-aware history: include as many recent turns as fit.
+        let recentTurns = Array(history.suffix(Self.contextWindowTurns))
+        var charBudget = Self.maxContextChars - prompt.count
+        var startIndex = recentTurns.count
+
+        // Walk backwards to find how many turns fit in the budget.
+        for i in stride(from: recentTurns.count - 1, through: 0, by: -1) {
+            let turn = recentTurns[i]
+            let turnChars = turn.user.count + turn.assistant.count
+            if charBudget - turnChars < 0 { break }
+            charBudget -= turnChars
+            startIndex = i
+        }
+
+        for turn in recentTurns[startIndex...] {
+            messages.append(["role": "user", "content": turn.user])
+            messages.append(["role": "assistant", "content": turn.assistant])
+        }
+
+        // Post-history identity reinforcement (Airi pattern).
+        // Injected after history, right before the current prompt, so the LLM
+        // sees this reminder immediately before generating — much more effective
+        // than burying it at the end of the system prompt for small models.
+        messages.append(["role": "system", "content": soul.postHistoryReminder(mood: mood)])
+
+        messages.append(["role": "user", "content": prompt])
+        return messages
+    }
+
+    // MARK: - Internal (Raw) LLM Call
+
+    /// Sends a bare prompt to the current provider WITHOUT personality context,
+    /// history, mood tags, or any system prompt. Used for internal operations
+    /// like memory extraction where the personality framing confuses small models.
+    func respondInternal(to prompt: String) async throws -> String {
+        let clean = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return "" }
+
+        let start = Date.now
+        let messages: [[String: String]] = [
+            ["role": "system", "content": "You are a helpful assistant. Follow instructions exactly."],
+            ["role": "user", "content": clean],
+        ]
+
+        let result: String
+        do {
+            switch config.provider {
+            case .local:
+                result = try await rawOllamaGenerate(messages: messages)
+            case .openai:
+                guard let key = config.openAIAPIKey, !key.isEmpty else {
+                    throw PikoBrainError.missingCloudCredentials("No API key configured")
+                }
+                result = try await rawOpenAIGenerate(messages: messages, apiKey: key, model: config.openAIModel)
+            case .anthropic:
+                guard let key = config.anthropicAPIKey, !key.isEmpty else {
+                    throw PikoBrainError.missingCloudCredentials("No API key configured")
+                }
+                result = try await rawAnthropicGenerate(messages: messages, apiKey: key, model: config.anthropicModel)
+            case .apple:
+                #if canImport(FoundationModels)
+                if #available(macOS 26.0, *) {
+                    let model = SystemLanguageModel.default
+                    guard model.isAvailable else { throw PikoBrainError.appleIntelligenceUnavailable }
+                    let session = LanguageModelSession(model: model)
+                    let response = try await session.respond(to: clean)
+                    let text = String(describing: response.content).trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { throw PikoBrainError.emptyResponse }
+                    result = text
+                } else {
+                    throw PikoBrainError.appleIntelligenceUnavailable
+                }
+                #else
+                throw PikoBrainError.appleIntelligenceUnavailable
+                #endif
+            }
+        } catch {
+            gateway.logError(message: error.localizedDescription, subsystem: .memory, detail: "internal_call")
+            throw error
+        }
+
+        let durationMs = Int(Date.now.timeIntervalSince(start) * 1000)
+        gateway.logInternalLLMCall(
+            purpose: "memory_extraction",
+            promptChars: clean.count,
+            responseChars: result.count,
+            durationMs: durationMs
+        )
+        return result
+    }
+
+    /// Raw Ollama chat call with explicit messages (no contextMessages).
+    private func rawOllamaGenerate(messages: [[String: String]]) async throws -> String {
+        let endpoint = config.localEndpoint.appendingPathComponent("api/chat")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "model": config.localModel,
+            "messages": messages,
+            "stream": false,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await Self.session.data(for: request)
+        try checkHTTPResponse(response)
+        let parsed = try JSONDecoder().decode(OllamaChatResponse.self, from: data)
+        let text = parsed.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw PikoBrainError.emptyResponse }
+        return text
+    }
+
+    /// Raw OpenAI chat call with explicit messages.
+    private func rawOpenAIGenerate(messages: [[String: String]], apiKey: String, model: String) async throws -> String {
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let body: [String: Any] = [
+            "model": model,
+            "messages": messages,
+            "temperature": 0.3,
+            "stream": false,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await Self.session.data(for: request)
+        try checkHTTPResponse(response, data: data)
+        let parsed = try JSONDecoder().decode(OpenAIResponse.self, from: data)
+        guard let text = parsed.choices.first?.message.content,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PikoBrainError.emptyResponse
+        }
+        return text
+    }
+
+    /// Raw Anthropic call with explicit messages.
+    private func rawAnthropicGenerate(messages: [[String: String]], apiKey: String, model: String) async throws -> String {
+        var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        var chatMessages: [[String: String]] = []
+        var systemText: String?
+        for msg in messages {
+            if msg["role"] == "system" { systemText = msg["content"] }
+            else { chatMessages.append(msg) }
+        }
+        var body: [String: Any] = [
+            "model": model,
+            "max_tokens": 512,
+            "messages": chatMessages,
+            "stream": false,
+        ]
+        if let systemText { body["system"] = systemText }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await Self.session.data(for: request)
+        try checkHTTPResponse(response, data: data)
+        let parsed = try JSONDecoder().decode(AnthropicResponse.self, from: data)
+        guard let text = parsed.content.first?.text,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PikoBrainError.emptyResponse
+        }
+        return text
     }
 
     // MARK: - Cloud Fallback
 
-    private func cloudFallbackResponse(prompt: String) async throws -> String? {
+    private func cloudFallbackResponse(prompt: String, mood: NotchManager.Mood = .neutral) async throws -> String? {
         switch config.cloudFallback {
         case .none:
             return nil
         case .openai:
             guard let key = config.openAIAPIKey, !key.isEmpty else { return nil }
-            return try await openAIGenerate(prompt: prompt, apiKey: key, model: config.openAIModel)
+            return try await openAIGenerate(prompt: prompt, apiKey: key, model: config.openAIModel, mood: mood)
         case .anthropic:
             guard let key = config.anthropicAPIKey, !key.isEmpty else { return nil }
-            return try await anthropicGenerate(prompt: prompt, apiKey: key, model: config.anthropicModel)
+            return try await anthropicGenerate(prompt: prompt, apiKey: key, model: config.anthropicModel, mood: mood)
         }
     }
 
     // MARK: - Local Backend
 
-    private func localGenerate(prompt: String) async throws -> String {
-        if let localText = try await generateWithFoundationModels(prompt: prompt), !localText.isEmpty {
-            return localText
-        }
-
-        let endpoint = config.localEndpoint.appendingPathComponent("api/generate")
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body = try JSONEncoder().encode(OllamaRequestBody(model: config.localModel, prompt: prompt, stream: false))
-        request.httpBody = body
-
+    private func localGenerate(prompt: String, mood: NotchManager.Mood = .neutral) async throws -> String {
+        let request = try ollamaRequest(prompt: prompt, stream: false, mood: mood)
         let (data, response) = try await Self.session.data(for: request)
         try checkHTTPResponse(response)
 
-        let parsed = try JSONDecoder().decode(OllamaResponse.self, from: data)
-        let text = parsed.response.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = try JSONDecoder().decode(OllamaChatResponse.self, from: data)
+        let text = parsed.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw PikoBrainError.emptyResponse }
         return text
     }
 
-    private func localStreamGenerate(prompt: String) -> AsyncThrowingStream<String, Error> {
+    private func localStreamGenerate(prompt: String, mood: NotchManager.Mood = .neutral) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task {
-                // Try FoundationModels first (no streaming — simulate it)
-                if let localText = try? await self.generateWithFoundationModels(prompt: prompt), !localText.isEmpty {
-                    for char in localText {
-                        try Task.checkCancellation()
-                        continuation.yield(String(char))
-                        try await Task.sleep(for: .milliseconds(15))
-                    }
-                    continuation.finish()
-                    return
-                }
-
-                let endpoint = self.config.localEndpoint.appendingPathComponent("api/generate")
-                var request = URLRequest(url: endpoint)
-                request.httpMethod = "POST"
-                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-
-                let body = try JSONEncoder().encode(OllamaRequestBody(model: self.config.localModel, prompt: prompt, stream: true))
-                request.httpBody = body
+                let request = try self.ollamaRequest(prompt: prompt, stream: true, mood: mood)
 
                 let (bytes, response) = try await Self.session.bytes(for: request)
                 try self.checkHTTPResponse(response)
@@ -288,9 +573,10 @@ final class PikoBrain {
                 for try await line in bytes.lines {
                     try Task.checkCancellation()
                     guard let data = line.data(using: .utf8) else { continue }
-                    if let chunk = try? JSONDecoder().decode(OllamaStreamChunk.self, from: data) {
-                        if !chunk.response.isEmpty {
-                            continuation.yield(chunk.response)
+                    if let chunk = try? JSONDecoder().decode(OllamaChatStreamChunk.self, from: data) {
+                        let text = chunk.message.content
+                        if !text.isEmpty {
+                            continuation.yield(text)
                         }
                         if chunk.done { break }
                     }
@@ -300,24 +586,58 @@ final class PikoBrain {
         }
     }
 
-    private func generateWithFoundationModels(prompt: String) async throws -> String? {
+    private func generateWithFoundationModels(prompt: String, mood: NotchManager.Mood = .neutral) async -> String? {
 #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             let model = SystemLanguageModel.default
             guard model.isAvailable else { return nil }
-            let session = LanguageModelSession(model: model)
-            let response = try await session.respond(to: prompt)
-            let text = String(describing: response.content).trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? nil : text
+            do {
+                // FoundationModels doesn't support chat messages, so compose
+                // the system prompt + history into a single text prompt.
+                let recalled = memory.recallRelevant(for: prompt, from: store)
+                let systemText = soul.systemPrompt(mood: mood, memories: recalled)
+                var composed = "System: \(systemText)\n\n"
+                let recentTurns = history.suffix(Self.contextWindowTurns)
+                for turn in recentTurns {
+                    composed += "User: \(turn.user)\nAssistant: \(turn.assistant)\n\n"
+                }
+                composed += "System: \(soul.postHistoryReminder(mood: mood))\n\n"
+                composed += "User: \(prompt)\nAssistant:"
+
+                let session = LanguageModelSession(model: model)
+                let response = try await session.respond(to: composed)
+                let text = String(describing: response.content).trimmingCharacters(in: .whitespacesAndNewlines)
+                return text.isEmpty ? nil : text
+            } catch {
+                // Safety guardrails or other FoundationModels errors —
+                // fall through to Ollama / cloud backend.
+                return nil
+            }
         }
 #endif
         return nil
     }
 
+    private func ollamaRequest(prompt: String, stream: Bool, mood: NotchManager.Mood = .neutral) throws -> URLRequest {
+        let endpoint = config.localEndpoint.appendingPathComponent("api/chat")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let messages = contextMessages(for: prompt, mood: mood)
+        let body: [String: Any] = [
+            "model": config.localModel,
+            "messages": messages,
+            "stream": stream,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
     // MARK: - OpenAI Backend
 
-    private func openAIGenerate(prompt: String, apiKey: String, model: String) async throws -> String {
-        let request = try openAIRequest(prompt: prompt, apiKey: apiKey, model: model, stream: false)
+    private func openAIGenerate(prompt: String, apiKey: String, model: String, mood: NotchManager.Mood = .neutral) async throws -> String {
+        let request = try openAIRequest(prompt: prompt, apiKey: apiKey, model: model, stream: false, mood: mood)
 
         let (data, response) = try await Self.session.data(for: request)
         try checkHTTPResponse(response, data: data)
@@ -330,10 +650,10 @@ final class PikoBrain {
         return text
     }
 
-    private func openAIStreamGenerate(prompt: String, apiKey: String, model: String) -> AsyncThrowingStream<String, Error> {
+    private func openAIStreamGenerate(prompt: String, apiKey: String, model: String, mood: NotchManager.Mood = .neutral) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task {
-                let request = try self.openAIRequest(prompt: prompt, apiKey: apiKey, model: model, stream: true)
+                let request = try self.openAIRequest(prompt: prompt, apiKey: apiKey, model: model, stream: true, mood: mood)
 
                 let (bytes, response) = try await Self.session.bytes(for: request)
                 try self.checkHTTPResponse(response)
@@ -354,7 +674,7 @@ final class PikoBrain {
         }
     }
 
-    private func openAIRequest(prompt: String, apiKey: String, model: String, stream: Bool) throws -> URLRequest {
+    private func openAIRequest(prompt: String, apiKey: String, model: String, stream: Bool, mood: NotchManager.Mood = .neutral) throws -> URLRequest {
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -362,7 +682,7 @@ final class PikoBrain {
 
         let body: [String: Any] = [
             "model": model,
-            "messages": [["role": "user", "content": prompt]],
+            "messages": contextMessages(for: prompt, mood: mood),
             "temperature": 0.7,
             "stream": stream,
         ]
@@ -372,8 +692,8 @@ final class PikoBrain {
 
     // MARK: - Anthropic Backend
 
-    private func anthropicGenerate(prompt: String, apiKey: String, model: String) async throws -> String {
-        let request = try anthropicRequest(prompt: prompt, apiKey: apiKey, model: model, stream: false)
+    private func anthropicGenerate(prompt: String, apiKey: String, model: String, mood: NotchManager.Mood = .neutral) async throws -> String {
+        let request = try anthropicRequest(prompt: prompt, apiKey: apiKey, model: model, stream: false, mood: mood)
 
         let (data, response) = try await Self.session.data(for: request)
         try checkHTTPResponse(response, data: data)
@@ -386,10 +706,10 @@ final class PikoBrain {
         return text
     }
 
-    private func anthropicStreamGenerate(prompt: String, apiKey: String, model: String) -> AsyncThrowingStream<String, Error> {
+    private func anthropicStreamGenerate(prompt: String, apiKey: String, model: String, mood: NotchManager.Mood = .neutral) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task {
-                let request = try self.anthropicRequest(prompt: prompt, apiKey: apiKey, model: model, stream: true)
+                let request = try self.anthropicRequest(prompt: prompt, apiKey: apiKey, model: model, stream: true, mood: mood)
 
                 let (bytes, response) = try await Self.session.bytes(for: request)
                 try self.checkHTTPResponse(response)
@@ -410,19 +730,34 @@ final class PikoBrain {
         }
     }
 
-    private func anthropicRequest(prompt: String, apiKey: String, model: String, stream: Bool) throws -> URLRequest {
+    private func anthropicRequest(prompt: String, apiKey: String, model: String, stream: Bool, mood: NotchManager.Mood = .neutral) throws -> URLRequest {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
 
-        let body: [String: Any] = [
+        // Anthropic uses a separate "system" param, not a system message in the array.
+        let allMessages = contextMessages(for: prompt, mood: mood)
+        var systemText: String?
+        var chatMessages: [[String: String]] = []
+        for msg in allMessages {
+            if msg["role"] == "system" {
+                systemText = msg["content"]
+            } else {
+                chatMessages.append(msg)
+            }
+        }
+
+        var body: [String: Any] = [
             "model": model,
             "max_tokens": 1024,
-            "messages": [["role": "user", "content": prompt]],
+            "messages": chatMessages,
             "stream": stream,
         ]
+        if let systemText {
+            body["system"] = systemText
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
     }
@@ -443,14 +778,6 @@ final class PikoBrain {
     }
 }
 
-// MARK: - Request Bodies
-
-private struct OllamaRequestBody: Encodable {
-    let model: String
-    let prompt: String
-    let stream: Bool
-}
-
 // MARK: - Errors
 
 enum PikoBrainError: LocalizedError {
@@ -458,6 +785,7 @@ enum PikoBrainError: LocalizedError {
     case badHTTPResponse(statusCode: Int, detail: String?)
     case emptyResponse
     case missingCloudCredentials(String)
+    case appleIntelligenceUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -476,6 +804,8 @@ enum PikoBrainError: LocalizedError {
             return "Model returned nothing"
         case .missingCloudCredentials(let msg):
             return msg
+        case .appleIntelligenceUnavailable:
+            return "Apple Intelligence is not available"
         }
     }
 
@@ -491,6 +821,8 @@ enum PikoBrainError: LocalizedError {
             return "Try a different prompt or model"
         case .missingCloudCredentials:
             return "Add your key in Settings → AI Model"
+        case .appleIntelligenceUnavailable:
+            return "Requires macOS 26+ with Apple Intelligence enabled"
         }
     }
 

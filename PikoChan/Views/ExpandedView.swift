@@ -1,36 +1,26 @@
 import SwiftUI
 
-/// Expanded notch: PikoChan sprite + two styled action buttons.
+/// Expanded notch controls.
 struct ExpandedView: View {
     let onTextTapped: () -> Void
     let onMicTapped: () -> Void
     private var settings: PikoSettings { PikoSettings.shared }
 
     var body: some View {
-        VStack(spacing: 14) {
-            // ── Mascot ──
-            Image("pikochan_sprite")
-                .resizable()
-                .interpolation(.none)
-                .aspectRatio(contentMode: .fit)
-                .frame(height: settings.spriteSize)
+        HStack(spacing: 16) {
+            PikoButton(
+                icon: "keyboard",
+                label: "Type",
+                accentColor: settings.typeButtonColor,
+                action: onTextTapped
+            )
 
-            // ── Action Buttons ──
-            HStack(spacing: 16) {
-                PikoButton(
-                    icon: "keyboard",
-                    label: "Type",
-                    accentColor: settings.typeButtonColor,
-                    action: onTextTapped
-                )
-
-                PikoButton(
-                    icon: "waveform",
-                    label: "Talk",
-                    accentColor: settings.talkButtonColor,
-                    action: onMicTapped
-                )
-            }
+            PikoButton(
+                icon: "waveform",
+                label: "Talk",
+                accentColor: settings.talkButtonColor,
+                action: onMicTapped
+            )
         }
     }
 }

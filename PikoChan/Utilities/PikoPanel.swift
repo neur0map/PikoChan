@@ -24,7 +24,7 @@ final class PikoPanel: NSPanel {
         hasShadow = false
         backgroundColor = .clear
         isOpaque = false
-        level = .statusBar
+        level = .screenSaver
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         isMovableByWindowBackground = false
         animationBehavior = .none

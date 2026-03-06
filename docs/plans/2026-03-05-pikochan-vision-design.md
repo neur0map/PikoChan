@@ -291,12 +291,17 @@ All files are:
 - [x] Response displayed in notch UI (response bubble) — animated bubble overlay in expanded/typing/listening states with "Thinking...", error, and response display
 - [x] Settings UI for AI model configuration — `AIModelTab.swift` with provider picker, local/cloud config, API key fields, save/reload
 
-### v0.3.0 — Soul & Memory
-- [ ] PikoSoul: personality.yaml loading + system prompt construction
-- [ ] PikoMemory: SQLite for conversations + VecturaKit for semantic search
-- [ ] Memory extraction: LLM picks out key facts from conversations
-- [ ] Memory recall: relevant memories injected into prompts
-- [ ] journal.md: PikoChan writes what she remembers
+### v0.3.0 — Soul & Memory ✅ (completed 2026-03-06)
+- [x] PikoSoul: personality.yaml loading + system prompt construction — mood-first prompt ordering, postHistoryReminder (Airi pattern)
+- [x] PikoStore: SQLite (C API) for chat_history + memories tables — persists across restarts
+- [x] MoodParser: emotion tag parsing from LLM responses — drives sprite changes
+- [x] Memory extraction: internal LLM call extracts facts, stores in SQLite
+- [x] Memory recall: oldest-first injection of all stored memories into prompt context
+- [x] journal.md: PikoChan writes what she remembers about the user
+- [x] PikoGateway: structured JSONL logging — daily rolling, 7-day prune, 50MB cap
+- [x] PikoHTTPServer: NWListener HTTP gateway on port 7878 — /chat, /health, /history, /logs, /memories, /config, /mood
+- [x] SoulTab: Settings UI for personality editing + memory management
+- [x] Brain injection: PikoBrain shared between NotchManager and HTTPServer via AppDelegate
 
 ### v0.4.0 — Hands
 - [ ] PikoTerminal: detect running terminals, type commands via AppleScript

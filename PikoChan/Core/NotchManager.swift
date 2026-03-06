@@ -29,6 +29,23 @@ final class NotchManager {
     var lastResponseSuggestion: String?
     var lastErrorOpensSettings: Bool = false
     var isResponseExpanded: Bool = false
+    var showsChatHistory: Bool = false
+
+    var recentHistory: [ChatTurn] {
+        brain.history.suffix(3).map { turn in
+            let (_, clean) = MoodParser.parse(from: turn.assistant)
+            return ChatTurn(user: turn.user, assistant: clean, at: turn.at, mood: turn.mood)
+        }
+    }
+
+    var activeProviderLabel: String {
+        switch brain.config.provider {
+        case .local:     brain.config.localModel
+        case .openai:    brain.config.openAIModel
+        case .anthropic: brain.config.anthropicModel
+        case .apple:     "Apple Intelligence"
+        }
+    }
 
     /// Remembers what the user was doing before hiding, so reopening resumes.
     private var lastActiveState: NotchState = .expanded
@@ -38,7 +55,11 @@ final class NotchManager {
     private(set) var panel: PikoPanel?
     private var panelSize: CGSize = .zero
     private var moodImages: [Mood: NSImage] = [:]
-    private let brain = PikoBrain()
+    let brain: PikoBrain
+
+    init(brain: PikoBrain) {
+        self.brain = brain
+    }
 
     // MARK: - Monitors
 
@@ -51,6 +72,7 @@ final class NotchManager {
     private var localKeyMonitor: Any?
     private var hoverDebounceTask: Task<Void, Never>?
     private var currentResponseTask: Task<Void, Never>?
+    private var moodDecayTask: Task<Void, Never>?
     private var hoverPollTimer: Timer?
     private let menuTarget = ContextMenuTarget()
 
@@ -79,6 +101,8 @@ final class NotchManager {
     func teardown() {
         currentResponseTask?.cancel()
         currentResponseTask = nil
+        moodDecayTask?.cancel()
+        moodDecayTask = nil
         removeMonitors()
         panel?.orderOut(nil)
         panel = nil
@@ -168,7 +192,7 @@ final class NotchManager {
     var activeContentWidth: CGFloat { 290 }
 
     var showsResponseBubble: Bool {
-        isResponding || !lastResponseText.isEmpty || lastResponseError != nil
+        isResponding || !lastResponseText.isEmpty || lastResponseError != nil || showsChatHistory
     }
 
     private var responseBlockHeight: CGFloat {
@@ -292,14 +316,19 @@ final class NotchManager {
         lastErrorOpensSettings = false
         lastResponseText = ""
         isResponseExpanded = false
+        showsChatHistory = false
         transition(to: .expanded)
 
         currentResponseTask = Task { [weak self] in
             guard let self else { return }
             self.brain.reloadConfig()
+            self.resetMoodDecay()
+            PikoGateway.shared.logUserMessage(prompt, mood: self.currentMood.rawValue)
 
             var hasContent = false
-            for await chunk in self.brain.respondStreaming(to: prompt) {
+            var moodParsed = false
+            var rawAccumulated = ""
+            for await chunk in self.brain.respondStreaming(to: prompt, mood: self.currentMood) {
                 guard !Task.isCancelled else { break }
                 // Detect embedded error markers from the stream.
                 if chunk.hasPrefix("\n\n[Error: ") {
@@ -308,9 +337,36 @@ final class NotchManager {
                         .replacingOccurrences(of: "]", with: "")
                     self.setError(fromLocalizedDescription: errorText)
                 } else {
-                    self.lastResponseText += chunk
+                    rawAccumulated += chunk
+
+                    // Parse mood tag from accumulated text once we see `]`.
+                    if !moodParsed && rawAccumulated.contains("]") {
+                        let (parsedMood, cleanText) = MoodParser.parse(from: rawAccumulated)
+                        if let parsedMood {
+                            let oldMood = self.currentMood
+                            self.currentMood = parsedMood
+                            if oldMood != parsedMood {
+                                PikoGateway.shared.logMoodChange(
+                                    from: oldMood.rawValue,
+                                    to: parsedMood.rawValue,
+                                    trigger: "llm_response"
+                                )
+                            }
+                        }
+                        moodParsed = true
+                        self.lastResponseText = cleanText
+                    } else if moodParsed {
+                        self.lastResponseText += chunk
+                    }
+                    // While mood not yet parsed, don't display raw tag to user.
+
                     hasContent = true
                 }
+            }
+
+            // If mood was never parsed (no `]` found), display full text.
+            if !moodParsed && !rawAccumulated.isEmpty {
+                self.lastResponseText = rawAccumulated
             }
 
             if !Task.isCancelled {
@@ -329,6 +385,15 @@ final class NotchManager {
         currentResponseTask?.cancel()
         currentResponseTask = nil
         isResponding = false
+    }
+
+    private func resetMoodDecay() {
+        moodDecayTask?.cancel()
+        moodDecayTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(300)) // 5 minutes
+            guard !Task.isCancelled, let self else { return }
+            self.currentMood = .neutral
+        }
     }
 
     func openSettingsToAIModel() {
@@ -371,6 +436,9 @@ final class NotchManager {
         case let s where s.contains("Model returned nothing"):
             suggestion = "Try a different prompt or model"
             opensSettings = false
+        case let s where s.contains("Apple Intelligence is not available"):
+            suggestion = "Requires macOS 26+ with Apple Intelligence enabled"
+            opensSettings = true
         default:
             suggestion = "Check your connection and try again"
             opensSettings = false

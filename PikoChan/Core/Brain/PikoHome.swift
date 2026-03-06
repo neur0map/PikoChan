@@ -15,6 +15,7 @@ struct PikoHome {
     var memoryDir: URL { root.appendingPathComponent("memory", isDirectory: true) }
     var mcpDir: URL { root.appendingPathComponent("mcp", isDirectory: true) }
     var modelsDir: URL { root.appendingPathComponent("models", isDirectory: true) }
+    var logsDir: URL { root.appendingPathComponent("logs", isDirectory: true) }
 
     var personalityFile: URL { soulDir.appendingPathComponent("personality.yaml") }
     var moodFile: URL { soulDir.appendingPathComponent("mood.yaml") }
@@ -27,7 +28,7 @@ struct PikoHome {
     var mcpServersFile: URL { mcpDir.appendingPathComponent("servers.yaml") }
 
     func bootstrap(fileManager: FileManager = .default) throws {
-        let dirs = [root, soulDir, skillsDir, customSkillsDir, memoryDir, mcpDir, modelsDir]
+        let dirs = [root, soulDir, skillsDir, customSkillsDir, memoryDir, mcpDir, modelsDir, logsDir]
         for dir in dirs {
             try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         }
@@ -42,9 +43,7 @@ struct PikoHome {
         try writeIfMissing(journalFile, contents: "# PikoChan Journal\n\n")
         try writeIfMissing(mcpServersFile, contents: "servers: []\n")
 
-        if !fileManager.fileExists(atPath: memoryDBFile.path) {
-            fileManager.createFile(atPath: memoryDBFile.path, contents: Data())
-        }
+        // SQLite creates the DB file on first open — no need to pre-create.
     }
 
     private func writeIfMissing(_ file: URL, contents: String, fileManager: FileManager = .default) throws {
@@ -61,14 +60,27 @@ local_endpoint: http://127.0.0.1:11434
 cloud_fallback: none
 openai_model: gpt-4o-mini
 anthropic_model: claude-3-5-haiku-latest
+gateway_port: 7878
 # API keys are stored securely in macOS Keychain.
 # Configure them in Settings → AI Model.
 """
 
     static let defaultPersonalityYAML = """
 name: PikoChan
-style: playful
-sass_level: 2
+tagline: "An AI buddy who lives in your Mac's notch"
+traits:
+  - playful
+  - curious
+  - slightly snarky
+communication_style: casual
+sass_level: 3
+first_person: "I"
+refers_to_user_as: "you"
+rules:
+  - "Keep responses under 3 sentences unless asked for detail"
+  - "Use casual language, no corporate speak"
+  - "Express opinions — don't be neutral about everything"
+  - "React to what the user says with genuine emotion"
 """
 
     static let defaultMoodYAML = """

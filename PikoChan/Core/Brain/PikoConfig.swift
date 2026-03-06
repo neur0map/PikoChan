@@ -5,6 +5,7 @@ struct PikoConfig {
         case local
         case openai
         case anthropic
+        case apple
     }
 
     enum CloudFallback: String {
@@ -21,6 +22,7 @@ struct PikoConfig {
     var anthropicModel: String
     var openAIAPIKey: String?
     var anthropicAPIKey: String?
+    var gatewayPort: UInt16
 
     static let `default` = PikoConfig(
         provider: .local,
@@ -30,7 +32,8 @@ struct PikoConfig {
         openAIModel: "gpt-4o-mini",
         anthropicModel: "claude-3-5-haiku-latest",
         openAIAPIKey: nil,
-        anthropicAPIKey: nil
+        anthropicAPIKey: nil,
+        gatewayPort: 7878
     )
 }
 
@@ -51,6 +54,12 @@ enum PikoConfigLoader {
         // API keys: prefer Keychain, fall back to YAML for migration.
         let openAIAPIKey = PikoKeychain.load(account: "openai_api_key") ?? map["openai_api_key"]?.nonEmpty
         let anthropicAPIKey = PikoKeychain.load(account: "anthropic_api_key") ?? map["anthropic_api_key"]?.nonEmpty
+        let gatewayPort: UInt16 = {
+            if let envPort = ProcessInfo.processInfo.environment["PIKOCHAN_PORT"],
+               let port = UInt16(envPort) { return port }
+            if let yamlPort = map["gateway_port"], let port = UInt16(yamlPort) { return port }
+            return PikoConfig.default.gatewayPort
+        }()
 
         return PikoConfig(
             provider: provider,
@@ -60,7 +69,8 @@ enum PikoConfigLoader {
             openAIModel: openAIModel,
             anthropicModel: anthropicModel,
             openAIAPIKey: openAIAPIKey,
-            anthropicAPIKey: anthropicAPIKey
+            anthropicAPIKey: anthropicAPIKey,
+            gatewayPort: gatewayPort
         )
     }
 

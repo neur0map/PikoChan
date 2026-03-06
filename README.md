@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-000000?style=flat&logo=apple&logoColor=white" />
   <img src="https://img.shields.io/badge/swift-6.0-F05138?style=flat&logo=swift&logoColor=white" />
-  <img src="https://img.shields.io/badge/version-0.2.0--alpha-blue?style=flat" />
+  <img src="https://img.shields.io/badge/version-0.3.0--alpha-blue?style=flat" />
   <img src="https://img.shields.io/github/license/neur0map/PikoChan?style=flat" />
   <img src="https://img.shields.io/badge/LLM-local--first-brightgreen?style=flat" />
 </p>
@@ -50,29 +50,108 @@ PikoChan draws from three projects that got specific things right:
 
 ---
 
-## Current State: v0.2.0-alpha
+## Current State: v0.3.0-alpha
 
-PikoChan has a brain. She can think, respond, and hold a conversation — all from inside your notch.
+PikoChan has a brain, a soul, and memory. She remembers who you are, has moods that shift with the conversation, and can be accessed headlessly via HTTP.
 
 **What works today:**
 
-- Everything from v0.1.0 (notch UI, animations, state machine, settings)
-- `~/.pikochan/` directory structure with human-readable YAML configs
-- Local LLM inference via Apple FoundationModels (macOS 26+) and Ollama-compatible HTTP endpoints
-- Cloud API fallback (OpenAI, Anthropic) with API key management and model selection
-- Full conversation loop: type in the notch, get a response from a local or cloud model
-- Animated response bubble with status indicators (thinking, error, response)
-- AI Model settings tab: provider picker, local/cloud config, API key fields
+- Everything from v0.1.0 (notch UI, animations, state machine, settings) and v0.2.0 (brain, LLM providers, streaming)
+- **Soul system**: personality loaded from `personality.yaml` — traits, communication style, sass level, behavioral rules
+- **Mood system**: dynamic mood tags (`[playful]`, `[snarky]`, `[proud]`, etc.) parsed from LLM responses, driving sprite changes
+- **Memory**: SQLite-backed fact extraction and recall — PikoChan remembers your name, preferences, and conversations across restarts
+- **Journal**: human-readable `~/.pikochan/memory/journal.md` of everything she remembers about you
+- **HTTP Gateway**: lightweight NWListener server on port 7878 — talk to PikoChan via `curl` or any HTTP client
+- **Structured logging**: JSONL gateway logs at `~/.pikochan/logs/` with rolling daily files and auto-pruning
+- **Settings**: Soul tab for personality editing and memory management
+- Four LLM providers: Ollama (local), OpenAI, Anthropic, Apple Intelligence
+
+**Provider notes:**
+
+- **OpenAI `gpt-4o-mini`** is the recommended provider for now — best mood accuracy and personality adherence
+- **Local models** (phi4-mini, qwen) need more prompt engineering work for reliable mood tagging and persona maintenance
+- Local models run fully offline with zero cloud dependency via [Ollama](https://ollama.com)
 
 **What doesn't exist yet:**
 
-- No personality system — she responds, but without soul
-- No memory — she forgets everything between conversations
 - No terminal or browser control
 - No voice (STT/TTS)
-- No skills
+- No skills system
+- No semantic memory search (currently injects all memories oldest-first)
 
-That's what the roadmap is for.
+---
+
+## HTTP Gateway
+
+PikoChan runs a lightweight HTTP server on port 7878 (configurable via `gateway_port` in `~/.pikochan/config.yaml`). This lets you interact with PikoChan headlessly — useful for debugging, testing, and future integrations.
+
+```bash
+# Health check
+curl -s localhost:7878/health | jq
+
+# Chat (non-streaming)
+curl -s -X POST localhost:7878/chat -d '{"prompt":"hello"}' | jq
+
+# Chat (SSE streaming)
+curl -sN -X POST localhost:7878/chat -d '{"prompt":"tell me a joke","stream":true}'
+
+# Check memories
+curl -s localhost:7878/memories | jq
+
+# View conversation history
+curl -s localhost:7878/history?limit=5 | jq
+
+# Set mood
+curl -s -X POST localhost:7878/mood -d '{"mood":"playful"}' | jq
+
+# View config
+curl -s localhost:7878/config | jq
+
+# Tail logs
+curl -s localhost:7878/logs?limit=20 | jq
+```
+
+The HTTP server shares the same `PikoBrain` instance as the notch UI — conversations, memories, and mood state are shared between both interfaces.
+
+---
+
+## AI Models
+
+PikoChan supports four LLM providers. Switch between them in **Settings → AI Model**.
+
+### Cloud APIs (recommended for now)
+
+- **OpenAI** — default model: `gpt-4o-mini`. Best personality adherence and mood accuracy. Requires API key from [platform.openai.com](https://platform.openai.com)
+- **Anthropic** — default model: `claude-3-5-haiku-latest`. Requires API key from [console.anthropic.com](https://console.anthropic.com)
+
+API keys are stored in macOS Keychain, never written to config files.
+
+### Local via Ollama
+
+Runs on your machine via [Ollama](https://ollama.com). No data leaves your Mac. Default model: `phi4-mini`.
+
+| Model | Params | Install | Notes |
+|-------|--------|---------|-------|
+| `phi4-mini` | 3.8B | `ollama pull phi4-mini` | Default. Fast but struggles with mood tags |
+| `llama3.2` | 3B | `ollama pull llama3.2` | Fast, minimal guardrails |
+| `mistral` | 7B | `ollama pull mistral` | Strong general-purpose |
+| `qwen2.5` | 7B | `ollama pull qwen2.5` | Excellent reasoning, multilingual |
+
+> **Note:** Local models need more prompt engineering work for reliable mood tagging and persona maintenance. Cloud providers (especially `gpt-4o-mini`) give significantly better results for personality-driven responses today.
+
+### Apple Intelligence (experimental)
+
+On-device inference via Apple's FoundationModels framework. Requires macOS 26+ (Tahoe) with Apple Intelligence enabled. No API key needed.
+
+**Limitations:**
+- ~3B parameter model with aggressive safety filters that cannot be tuned
+- No multi-turn conversation support (single-shot only)
+- Frequently refuses benign prompts
+- No streaming — responses are simulated character-by-character
+
+### Cloud Fallback
+
+When using the Local provider, you can configure a cloud fallback (OpenAI or Anthropic) that activates automatically if Ollama is unreachable.
 
 ---
 
@@ -84,34 +163,37 @@ PikoChan is built in four layers, each with a clear responsibility:
 ┌─────────────────────────────────────────────┐
 │              Layer 1: NOTCH UI              │
 │  SwiftUI + AppKit, animations, state machine │
-│  (v0.1.0-alpha — exists today)              │
+│  (v0.1.0 ✅)                                │
 ├─────────────────────────────────────────────┤
 │              Layer 2: BRAIN                 │
 │  PikoBrain    — LLM orchestrator            │
 │  PikoSoul     — personality + mood system   │
-│  PikoMemory   — vector DB + SQLite          │
-│  PikoMCP      — MCP client (Swift SDK)      │
+│  PikoMemory   — SQLite memory pipeline      │
+│  PikoHTTPServer — HTTP gateway (port 7878)  │
+│  PikoGateway  — structured JSONL logging    │
+│  (v0.2.0 + v0.3.0 ✅)                       │
 ├─────────────────────────────────────────────┤
 │              Layer 3: HANDS                 │
 │  PikoTerminal     — terminal control        │
 │  PikoBrowser      — browser automation      │
 │  PikoAccessibility — screen reading         │
 │  PikoHeartbeat    — background awareness    │
+│  (v0.4.0 — planned)                         │
 ├─────────────────────────────────────────────┤
 │              Layer 4: SKILLS                │
 │  Markdown skill files (YAML frontmatter)    │
-│  User-created, downloadable, shareable      │
-│  PikoChan reads them as instructions        │
+│  MCP client for external tool servers       │
+│  (v0.5.0 — planned)                         │
 └─────────────────────────────────────────────┘
 ```
 
-**Layer 1** is pure UI — the notch panel, animations, and state machine. This is what v0.1.0-alpha delivers.
+**Layer 1** is pure UI — the notch panel, animations, and state machine.
 
-**Layer 2** is the brain — local LLM inference via MLX Swift, a composable personality system, semantic memory with vector search, and MCP tool integration.
+**Layer 2** is the brain — multi-provider LLM orchestration (Ollama, OpenAI, Anthropic, Apple Intelligence), composable personality via `PikoSoul`, SQLite-backed memory with fact extraction, an HTTP gateway for headless access, and structured JSONL logging.
 
-**Layer 3** is the hands — how PikoChan interacts with your Mac. Terminal commands via AppleScript, browser automation via Chrome DevTools Protocol, screen reading via the Accessibility API, and a heartbeat loop that observes what you're doing.
+**Layer 3** is the hands — how PikoChan will interact with your Mac. Terminal commands, browser automation, screen reading, and a heartbeat loop for background awareness.
 
-**Layer 4** is the skills — plain Markdown files that teach PikoChan new abilities. Write one, drop it in a folder, and she knows how to do something new.
+**Layer 4** is the skills — plain Markdown files that teach PikoChan new abilities, plus MCP integration for external tools.
 
 ---
 
@@ -128,16 +210,18 @@ PikoChan can think and respond.
 - Response bubble in the notch UI with status indicators
 - AI Model settings tab for provider and model configuration
 
-### v0.3.0 — Soul & Memory
+### v0.3.0 — Soul & Memory ✅
 
-Give PikoChan personality and the ability to remember.
+PikoChan has personality, emotions, memory, and an HTTP gateway.
 
-- **Soul container**: personality traits, communication style, behavioral constraints — all loaded from `personality.yaml`
-- **Mood system**: dynamic mood state that shifts based on what PikoChan observes. Mood affects tone — she can be snarky, encouraging, concerned, or playful depending on context
-- **SQLite database**: conversation history, user preferences, mood history over time
-- **Semantic memory**: [VecturaKit](https://github.com/rryam/VecturaKit) for on-device vector search with hybrid BM25 + semantic matching
-- **Memory pipeline**: extract key facts from conversations, embed them, recall relevant memories before responding
-- **Journal**: PikoChan writes a human-readable `journal.md` of things she remembers about you
+- **Soul container**: `PikoSoul` loads personality from `personality.yaml` — traits, sass level, communication style, rules. System prompt constructed dynamically with mood-first ordering
+- **Mood system**: LLM responses start with emotion tags (`[playful]`, `[snarky]`, `[proud]`, etc.), parsed by `MoodParser` to drive sprite changes. Post-history reminder (Airi pattern) reinforces identity before each response
+- **SQLite database**: `PikoStore` manages `chat_history` and `memories` tables via C SQLite API. Persists across app restarts
+- **Memory pipeline**: `PikoMemory` extracts facts from conversations via internal LLM call, stores in SQLite, recalls oldest-first for context injection
+- **Journal**: human-readable `~/.pikochan/memory/journal.md` updated after each extraction
+- **HTTP Gateway**: `PikoHTTPServer` (NWListener) on port 7878 — POST /chat, GET /health, /history, /logs, /memories, /config, POST /mood
+- **Structured logging**: `PikoGateway` JSONL logger with daily rolling, 7-day prune, 50MB cap
+- **Settings**: Soul tab for personality editing and memory management
 
 ### v0.4.0 — Hands
 
@@ -194,26 +278,40 @@ Build and run (⌘R). PikoChan will appear in your notch. Hover below the notch 
 
 ```
 PikoChan/
-├── PikoChanApp.swift              # Entry point, AppDelegate, background agent setup
+├── PikoChanApp.swift              # Entry point, AppDelegate, brain injection wiring
 ├── Core/
 │   ├── NotchManager.swift         # State machine, mouse monitors, panel management
 │   ├── NotchState.swift           # Five-state enum (hidden, hovered, expanded, typing, listening)
 │   ├── PikoSettings.swift         # Observable settings store backed by UserDefaults
-│   └── SettingsWindowController.swift  # Native settings window with toolbar tabs
+│   ├── PikoHTTPServer.swift       # NWListener HTTP server (port 7878), all API endpoints
+│   ├── SettingsWindowController.swift  # Native settings window with toolbar tabs
+│   └── Brain/
+│       ├── PikoBrain.swift        # LLM orchestrator — multi-provider, streaming, history
+│       ├── PikoSoul.swift         # Personality YAML → system prompt + post-history reminder
+│       ├── MoodParser.swift       # Emotion tag parser ([playful], [snarky], etc.)
+│       ├── PikoMemory.swift       # Fact extraction + recall coordinator
+│       ├── PikoStore.swift        # SQLite (C API) — chat_history + memories tables
+│       ├── PikoGateway.swift      # Structured JSONL logger (daily rolling, 7-day prune)
+│       ├── PikoConfig.swift       # YAML config parser (provider, model, gateway port)
+│       ├── PikoConfigStore.swift  # Observable config binding for settings UI
+│       └── PikoHome.swift         # ~/.pikochan/ directory bootstrapping
 ├── Views/
 │   ├── NotchContentView.swift     # Root view — routes to state-specific views
-│   ├── ExpandedView.swift         # Sprite + action buttons
+│   ├── ExpandedView.swift         # Sprite + action buttons + response bubble
 │   ├── TypingView.swift           # Text input state
 │   ├── ListeningView.swift        # Voice input state with waveform
 │   ├── WaveView.swift             # 60fps Canvas waveform animation
 │   ├── NotchShape.swift           # Custom animatable notch clip shape
 │   └── Settings/
+│       ├── AIModelTab.swift       # Provider picker, model config, connection test
+│       ├── SoulTab.swift          # Personality editing + memory management
 │       ├── AppearanceTab.swift
 │       ├── BehaviorTab.swift
 │       ├── NotchTuneTab.swift
 │       └── AboutTab.swift
 └── Utilities/
     ├── PikoPanel.swift            # NSPanel subclass with activation state sync
+    ├── PikoKeychain.swift         # macOS Keychain wrapper for API keys
     ├── PikoTextField.swift        # NSViewRepresentable text field (avoids ViewBridge bugs)
     ├── NSScreen+Notch.swift       # Notch geometry detection
     └── VisualEffectView.swift     # NSVisualEffectView wrapper
@@ -223,25 +321,18 @@ PikoChan/
 
 ## Configuration
 
-All PikoChan configuration will live in `~/.pikochan/` as plain text files:
+All PikoChan configuration lives in `~/.pikochan/` as plain text files:
 
 ```
 ~/.pikochan/
-├── config.yaml               # LLM provider, model paths, API keys
+├── config.yaml               # LLM provider, model, gateway_port, fallback settings
 ├── soul/
-│   ├── personality.yaml      # Traits, communication style, sass level
-│   ├── mood.yaml             # Mood state, triggers, decay rules
-│   └── voice.yaml            # TTS settings
-├── skills/
-│   ├── terminal.md           # Built-in terminal skill
-│   ├── browser.md            # Built-in browser skill
-│   └── custom/               # Your own skills
+│   └── personality.yaml      # Traits, communication style, sass level, rules
 ├── memory/
-│   ├── pikochan.db           # SQLite database
-│   ├── vectors/              # Semantic search index
+│   ├── pikochan.db           # SQLite database (chat history + memories)
 │   └── journal.md            # What PikoChan remembers (human-readable)
-└── mcp/
-    └── servers.yaml          # MCP server connections
+└── logs/
+    └── YYYY-MM-DD.jsonl      # Structured gateway logs (rolling daily, 7-day prune)
 ```
 
 Everything is human-readable, git-friendly, and portable. Copy the folder to a new Mac and PikoChan comes with you — personality, memories, and all.
@@ -250,17 +341,15 @@ Everything is human-readable, git-friendly, and portable. Copy the folder to a n
 
 ## Technology Stack
 
-| Component | Technology | Credit |
-|-----------|-----------|--------|
-| UI Framework | Swift / SwiftUI / AppKit | [Apple](https://developer.apple.com/xcode/swiftui/) |
-| Local LLM | MLX Swift | [Apple ML Explore](https://github.com/ml-explore/mlx-swift) |
-| LLM Abstraction | LocalLLMClient | [tattn](https://github.com/tattn/LocalLLMClient) |
-| MCP Client | Swift MCP SDK | [Model Context Protocol](https://github.com/modelcontextprotocol/swift-sdk) |
-| Vector Search | VecturaKit | [rryam](https://github.com/rryam/VecturaKit) |
-| Embeddings | swift-embeddings | [jkrukowski](https://github.com/jkrukowski/swift-embeddings) |
-| Screen Reading | AXorcist | [steipete](https://github.com/AXorcist/AXorcist) |
-| Speech (STT/TTS) | sherpa-onnx | [k2-fsa](https://github.com/k2-fsa/sherpa-onnx) |
-| Ollama Integration | OllamaKit | [kevinhermawan](https://github.com/kevinhermawan/OllamaKit) |
+| Component | Technology | Notes |
+|-----------|-----------|-------|
+| UI Framework | Swift / SwiftUI / AppKit | Native macOS, zero web dependencies |
+| LLM (local) | Ollama HTTP API | Any Ollama-compatible model |
+| LLM (cloud) | OpenAI / Anthropic APIs | API keys stored in macOS Keychain |
+| LLM (on-device) | Apple FoundationModels | macOS 26+ experimental |
+| HTTP Server | Network.framework (NWListener) | Zero-dependency TCP server |
+| Database | SQLite (C API) | Chat history + memory storage |
+| Logging | Custom JSONL | Rolling daily, auto-prune |
 
 ---
 

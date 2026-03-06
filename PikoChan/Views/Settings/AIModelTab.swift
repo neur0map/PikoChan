@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 /// Settings tab for AI model configuration.
 struct AIModelTab: View {
@@ -15,6 +18,7 @@ struct AIModelTab: View {
                     Text("Local").tag(PikoConfig.Provider.local)
                     Text("OpenAI").tag(PikoConfig.Provider.openai)
                     Text("Anthropic").tag(PikoConfig.Provider.anthropic)
+                    Text("Apple").tag(PikoConfig.Provider.apple)
                 }
                 .pickerStyle(.segmented)
             } footer: {
@@ -31,6 +35,8 @@ struct AIModelTab: View {
                 openAISection
             case .anthropic:
                 anthropicSection
+            case .apple:
+                appleSection
             }
 
             Section {
@@ -125,6 +131,35 @@ struct AIModelTab: View {
         }
     }
 
+    private var appleSection: some View {
+        Section {
+            HStack {
+                Text("Status:")
+                Spacer()
+                Text(appleIntelligenceStatus)
+                    .foregroundStyle(appleIntelligenceAvailable ? .green : .secondary)
+            }
+        } header: {
+            Text("Apple Intelligence")
+        } footer: {
+            Text("On-device model via Apple Intelligence. No data leaves your Mac. No API key needed.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var appleIntelligenceAvailable: Bool {
+#if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            return SystemLanguageModel.default.isAvailable
+        }
+#endif
+        return false
+    }
+
+    private var appleIntelligenceStatus: String {
+        appleIntelligenceAvailable ? "Available" : "Not available"
+    }
+
     // MARK: - Helpers
 
     private var providerFooter: String {
@@ -132,6 +167,7 @@ struct AIModelTab: View {
         case .local:    "Runs on your machine via Ollama. No data leaves your Mac."
         case .openai:   "Routes all requests through OpenAI's API."
         case .anthropic: "Routes all requests through Anthropic's API."
+        case .apple:    "On-device Apple Intelligence. No data leaves your Mac."
         }
     }
 
@@ -163,6 +199,11 @@ struct AIModelTab: View {
         case .anthropic:
             if config.anthropicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 validationError = "API key required"
+                return false
+            }
+        case .apple:
+            if !appleIntelligenceAvailable {
+                validationError = "Apple Intelligence is not available on this system"
                 return false
             }
         }
@@ -233,6 +274,9 @@ struct AIModelTab: View {
             let (_, response) = try await session.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             return (200..<300).contains(code)
+
+        case .apple:
+            return appleIntelligenceAvailable
         }
     }
 

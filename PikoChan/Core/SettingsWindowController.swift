@@ -27,6 +27,7 @@ final class SettingsWindowController {
 
         let tabs: [(String, String, NSView)] = [
             ("Appearance", "paintbrush",                       NSHostingView(rootView: AppearanceTab())),
+            ("Soul",       "brain.head.profile",               NSHostingView(rootView: SoulTab())),
             ("AI Model",   "cpu",                              NSHostingView(rootView: AIModelTab())),
             ("Behavior",   "gearshape",                        NSHostingView(rootView: BehaviorTab())),
             ("Notch",      "rectangle.topthird.inset.filled",  NSHostingView(rootView: NotchTuneTab())),

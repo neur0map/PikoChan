@@ -206,6 +206,8 @@ struct NotchContentView: View {
         VStack(alignment: .leading, spacing: 4) {
             if manager.isResponding {
                 ThinkingDotsView()
+            } else if manager.showsChatHistory {
+                ChatHistoryView(turns: manager.recentHistory)
             } else if let err = manager.lastResponseError {
                 Text(err)
                     .font(.system(size: 12))
@@ -255,7 +257,7 @@ struct NotchContentView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // Fixed height prevents content-driven relayout loops.
-        .frame(height: manager.isResponseExpanded ? 200 : 62)
+        .frame(height: (manager.isResponseExpanded || manager.showsChatHistory) ? 200 : 62)
         .clipped()
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -267,17 +269,98 @@ struct NotchContentView: View {
                         .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
                 )
         )
+        .overlay(alignment: .topLeading) {
+            if !manager.isResponding && (!manager.lastResponseText.isEmpty || !manager.recentHistory.isEmpty) {
+                Button {
+                    manager.showsChatHistory.toggle()
+                    if manager.showsChatHistory {
+                        manager.isResponseExpanded = true
+                    }
+                    manager.updateVisibleContentRect()
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(manager.showsChatHistory ? 0.7 : 0.3))
+                }
+                .buttonStyle(.plain)
+                .padding(6)
+            }
+        }
         .overlay(alignment: .topTrailing) {
-            if !manager.isResponding && manager.lastResponseError == nil && !manager.lastResponseText.isEmpty {
+            if !manager.isResponding && !manager.showsChatHistory && manager.lastResponseError == nil && !manager.lastResponseText.isEmpty {
                 CopyButton(text: manager.lastResponseText)
                     .padding(6)
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            Text(manager.activeProviderLabel)
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.2))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+        }
         .contentShape(Rectangle())
         .onTapGesture {
-            if manager.lastResponseError == nil && !manager.lastResponseText.isEmpty && !manager.isResponding {
+            if !manager.showsChatHistory && manager.lastResponseError == nil && !manager.lastResponseText.isEmpty && !manager.isResponding {
                 manager.isResponseExpanded.toggle()
                 manager.updateVisibleContentRect()
+            }
+        }
+    }
+}
+
+// MARK: - Chat History View
+
+private struct ChatHistoryView: View {
+    let turns: [ChatTurn]
+
+    var body: some View {
+        if turns.isEmpty {
+            Text("No messages yet")
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.3))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 8) {
+                        ForEach(Array(turns.enumerated()), id: \.offset) { index, turn in
+                            // User bubble — right-aligned
+                            Text(turn.user)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .lineLimit(3)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(.cyan.opacity(0.2))
+                                )
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+
+                            // Assistant bubble — left-aligned
+                            Text(turn.assistant)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(.white.opacity(0.1))
+                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(index)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .frame(height: 180)
+                .onAppear {
+                    if !turns.isEmpty {
+                        proxy.scrollTo(turns.count - 1, anchor: .bottom)
+                    }
+                }
             }
         }
     }
