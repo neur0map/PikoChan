@@ -28,6 +28,14 @@ final class PikoConfigStore {
     var vllmEndpoint: String = "http://localhost:8000"
     var vllmAPIKey: String = ""
     var setupComplete: Bool = false
+    var heartbeatEnabled: Bool = true
+    var heartbeatInterval: Int = 60
+    var heartbeatNudgesEnabled: Bool = false
+    var nudgeLongIdle: Bool = true
+    var nudgeLateNight: Bool = true
+    var nudgeMarathon: Bool = false
+    var quietHoursStart: Int = 23
+    var quietHoursEnd: Int = 7
 
     private init() {
         do {
@@ -62,6 +70,14 @@ final class PikoConfigStore {
         huggingFaceAPIKey = PikoKeychain.load(account: "huggingface_api_key") ?? ""
         vllmAPIKey = PikoKeychain.load(account: "vllm_api_key") ?? ""
         setupComplete = cfg.setupComplete
+        heartbeatEnabled = cfg.heartbeatEnabled
+        heartbeatInterval = cfg.heartbeatInterval
+        heartbeatNudgesEnabled = cfg.heartbeatNudgesEnabled
+        nudgeLongIdle = cfg.nudgeLongIdle
+        nudgeLateNight = cfg.nudgeLateNight
+        nudgeMarathon = cfg.nudgeMarathon
+        quietHoursStart = cfg.quietHoursStart
+        quietHoursEnd = cfg.quietHoursEnd
     }
 
     func save() throws {
@@ -83,6 +99,14 @@ docker_model_runner_endpoint: \(dockerModelRunnerEndpoint.trimmingCharacters(in:
 vllm_model: \(vllmModel.trimmingCharacters(in: .whitespacesAndNewlines))
 vllm_endpoint: \(vllmEndpoint.trimmingCharacters(in: .whitespacesAndNewlines))
 setup_complete: \(setupComplete ? "true" : "false")
+heartbeat_enabled: \(heartbeatEnabled ? "true" : "false")
+heartbeat_interval: \(heartbeatInterval)
+heartbeat_nudges_enabled: \(heartbeatNudgesEnabled ? "true" : "false")
+nudge_long_idle: \(nudgeLongIdle ? "true" : "false")
+nudge_late_night: \(nudgeLateNight ? "true" : "false")
+nudge_marathon: \(nudgeMarathon ? "true" : "false")
+quiet_hours_start: \(quietHoursStart)
+quiet_hours_end: \(quietHoursEnd)
 """
 
         try yaml.write(to: home.configFile, atomically: true, encoding: .utf8)
@@ -139,6 +163,14 @@ docker_model_runner_endpoint: \(cfg.dockerModelRunnerEndpoint.absoluteString)
 vllm_model: \(cfg.vllmModel)
 vllm_endpoint: \(cfg.vllmEndpoint.absoluteString)
 setup_complete: \(cfg.setupComplete ? "true" : "false")
+heartbeat_enabled: \(cfg.heartbeatEnabled ? "true" : "false")
+heartbeat_interval: \(cfg.heartbeatInterval)
+heartbeat_nudges_enabled: \(cfg.heartbeatNudgesEnabled ? "true" : "false")
+nudge_long_idle: \(cfg.nudgeLongIdle ? "true" : "false")
+nudge_late_night: \(cfg.nudgeLateNight ? "true" : "false")
+nudge_marathon: \(cfg.nudgeMarathon ? "true" : "false")
+quiet_hours_start: \(cfg.quietHoursStart)
+quiet_hours_end: \(cfg.quietHoursEnd)
 """
             try? yaml.write(to: home.configFile, atomically: true, encoding: .utf8)
         }

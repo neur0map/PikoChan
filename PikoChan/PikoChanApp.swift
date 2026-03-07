@@ -16,6 +16,7 @@ struct PikoChanApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchManager: NotchManager?
     private var httpServer: PikoHTTPServer?
+    private var heartbeat: PikoHeartbeat?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide from Dock — PikoChan lives in the notch, not the taskbar.
@@ -23,6 +24,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let brain = PikoBrain()
         let manager = NotchManager(brain: brain)
+
+        // Voice components.
+        manager.voiceCapture = PikoAudioCapture()
+        manager.stt = PikoSTT()
+        manager.tts = PikoTTS()
+
         manager.start()
         notchManager = manager
 
@@ -41,9 +48,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         httpServer = server
+
+        // Heartbeat — environmental awareness + proactive nudges.
+        let hb = PikoHeartbeat(brain: brain, notchManager: manager)
+        hb.start()
+        heartbeat = hb
+        manager.heartbeat = hb
+        server.heartbeat = hb
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        heartbeat?.stop()
         httpServer?.stop()
         notchManager?.teardown()
     }

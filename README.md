@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-000000?style=flat&logo=apple&logoColor=white" />
   <img src="https://img.shields.io/badge/swift-6.0-F05138?style=flat&logo=swift&logoColor=white" />
-  <img src="https://img.shields.io/badge/version-0.3.7--alpha-blue?style=flat" />
+  <img src="https://img.shields.io/badge/version-0.4.0--alpha-blue?style=flat" />
   <img src="https://img.shields.io/github/license/neur0map/PikoChan?style=flat" />
   <img src="https://img.shields.io/badge/LLM-local--first-brightgreen?style=flat" />
 </p>
@@ -50,35 +50,37 @@ PikoChan draws from three projects that got specific things right:
 
 ---
 
-## Current State: v0.3.7-alpha
+## Current State: v0.4.0-alpha
 
-PikoChan has a brain, a soul, semantic memory, a first-time setup wizard, companion personality, and filesystem guardrails. She remembers who you are, finds relevant memories using embedding similarity, introduces herself on first launch, and can evolve her own personality files while staying safe from self-destructive edits.
+PikoChan has a brain, a soul, semantic memory, voice input/output, environmental awareness, a first-time setup wizard, companion personality, and filesystem guardrails. She can hear you, talk back, remember who you are, notice what you're doing, and evolve her personality across conversations.
 
 **What works today:**
 
-- Everything from v0.1.0 (notch UI, animations, state machine, settings), v0.2.0 (brain, LLM providers, streaming), v0.3.0 (soul, mood, memory, HTTP gateway), v0.3.5 (setup wizard, semantic memory), v0.3.6 (companion personality, maintenance), and v0.3.7 (path guard)
-- **Setup wizard**: in-notch 5-step guided flow on first launch — provider selection, API key validation, memory engine check, and summary
-- **Post-setup intro**: PikoChan introduces herself after setup and asks for the user's name — no cold start
-- **Semantic memory**: Snowflake Arctic Embed XS (384-dim, 22M params, CoreML) ranks memories by cosine similarity to the current query. Only relevant memories are injected into context — not all of them
-- **Asymmetric retrieval**: queries are prefixed with a retrieval instruction for better ranking accuracy; stored facts are embedded without prefix
-- **Hybrid recall**: memories with embeddings are ranked by similarity; unvectorized legacy memories are supplemented alongside
-- **WordPiece tokenizer**: BERT-compatible tokenizer (30522 vocab) runs entirely on-device for Arctic model input
-- **Companion personality**: system prompt frames PikoChan as a companion with opinions and moods, not an assistant
-- **Path guard**: OpenClaw-inspired filesystem guardrails — PikoChan can edit `~/.pikochan/` but cannot modify source code, app bundles, or system files
-- **Maintenance**: journal rotation (500KB cap, monthly archives), chat pruning (90 days)
-- Four LLM providers: Ollama (local), OpenAI, Anthropic, Apple Intelligence
+- Everything from v0.1.0–v0.3.9 (notch UI, brain, soul, memory, HTTP gateway, setup wizard, semantic memory, soul evolution, path guard)
+- **Voice input (STT)**: push-to-talk microphone capture via AVAudioEngine (16kHz mono WAV). Cloud transcription via Groq Whisper, OpenAI Whisper, or Deepgram Nova-2
+- **Voice output (TTS)**: cloud speech synthesis via OpenAI, ElevenLabs, Fish Audio, Cartesia, or fal.ai. Auto-speaks when input is voice; optional "Speak responses aloud" toggle for text input
+- **Mood-aware voice**: TTS models that support emotion prompts (e.g. fal.ai Qwen-3-TTS) receive PikoChan's current mood as a style hint — her voice matches her personality state
+- **Dynamic fal.ai models**: paste any fal.ai model ID, PikoChan fetches the OpenAPI schema and adapts — discovers text fields, voice options, and parameters automatically
+- **Heartbeat**: background awareness loop monitoring frontmost app, idle time, and time-of-day patterns. Proactive nudges when you've been idle or working too long
+- **Config commands**: PikoChan can modify her own config in response to conversation (schedule nudges, adjust behavior)
+- **Voice settings UI**: Settings → Voice tab with provider pickers, voice/model catalogs, API key sharing with AI Model tab, and Test TTS button
+- **Mic permissions**: proper `com.apple.security.device.audio-input` entitlement, native permission dialog, direct link to System Settings if denied
+- Nine LLM providers: Ollama (local), OpenAI, Anthropic, Apple Intelligence, Groq, Google Gemini, Mistral, DeepSeek, xAI Grok
 
 **Provider notes:**
 
-- **OpenAI `gpt-4o-mini`** is the recommended provider — best mood accuracy and personality adherence
+- **OpenAI `gpt-4o-mini`** is the recommended LLM provider — best mood accuracy and personality adherence
 - **Local models** (phi4-mini, qwen) need more prompt engineering work for reliable mood tagging
 - Local models run fully offline with zero cloud dependency via [Ollama](https://ollama.com)
+
+> **Voice status warning:** Voice responses are functional but still need significant work to feel natural and alive. Finding the right TTS model, voice preset, speed settings, and emotion mapping for PikoChan's personality requires extensive testing across providers and configurations. Local TTS models (sherpa-onnx, MLX) have not been tested yet — only cloud providers are wired up. Consider voice a working prototype, not a polished feature.
 
 **What doesn't exist yet:**
 
 - No terminal or browser control
-- No voice (STT/TTS)
+- No browser automation
 - No skills system
+- No local/on-device TTS or STT
 
 ---
 
@@ -174,14 +176,21 @@ PikoChan is built in four layers, each with a clear responsibility:
 │  PikoHTTPServer — HTTP gateway (port 7878)  │
 │  PikoGateway  — structured JSONL logging    │
 │  SetupManager — first-time setup wizard     │
-│  (v0.2.0–v0.3.7 ✅)                          │
+│  (v0.2.0–v0.3.9 ✅)                          │
+├─────────────────────────────────────────────┤
+│           Layer 2.5: VOICE                  │
+│  PikoAudioCapture — AVAudioEngine mic input │
+│  PikoSTT     — cloud speech-to-text         │
+│  PikoTTS     — cloud text-to-speech         │
+│  PikoHeartbeat — background awareness       │
+│  FalAISchema — dynamic model schema fetch   │
+│  (v0.4.0 ✅ — cloud providers working)       │
 ├─────────────────────────────────────────────┤
 │              Layer 3: HANDS                 │
 │  PikoTerminal     — terminal control        │
 │  PikoBrowser      — browser automation      │
 │  PikoAccessibility — screen reading         │
-│  PikoHeartbeat    — background awareness    │
-│  (v0.4.0 — planned)                         │
+│  (v0.4.0 — remaining)                       │
 ├─────────────────────────────────────────────┤
 │              Layer 4: SKILLS                │
 │  Markdown skill files (YAML frontmatter)    │
@@ -248,21 +257,32 @@ PikoChan learns from behavioral feedback and uses fewer tokens per message.
 - **Trivial message skip**: extraction skipped for "hi" / "ok" / "lol" style messages (user < 15 chars, assistant < 100 chars). Logged as `extraction_skip` gateway event
 - **Expanded companion behavior**: stronger anti-interrogation rules, memory relevance framing, topic-matching guidance in system prompt and post-history reminder
 
-### v0.4.0 — Hands
+### v0.4.0 — Voice & Awareness (in progress)
 
-Give PikoChan the ability to interact with your Mac.
+PikoChan can hear, speak, and notice what's happening on your Mac.
 
-- **Terminal control**: detect running terminals (Terminal.app, iTerm2), type commands via AppleScript. PikoChan suggests commands — you hit Enter. She never auto-executes
-- **Browser automation**: open URLs, execute JavaScript, read page content. AppleScript for quick tasks, Chrome DevTools Protocol for full control
-- **Screen reading**: [AXorcist](https://github.com/AXorcist/AXorcist) for reading the frontmost app, window titles, active text fields via the Accessibility API
-- **Heartbeat**: background loop every 30-60 seconds that observes frontmost app, idle time, time of day. Feeds into the mood system — she might suggest a break after a long session, notice you always open Spotify at a certain time, or stay quiet when you're in flow
+**Done:**
+- **Voice input (STT)**: push-to-talk mic capture (AVAudioEngine, 16kHz mono WAV) with cloud transcription (Groq Whisper, OpenAI Whisper, Deepgram Nova-2)
+- **Voice output (TTS)**: cloud speech synthesis with 5 providers (OpenAI, ElevenLabs, Fish Audio, Cartesia, fal.ai). File-based playback via AVAudioPlayer
+- **Mood-aware TTS**: PikoChan's current mood is sent as an emotion prompt to TTS models that support it (e.g. Qwen-3-TTS)
+- **Dynamic fal.ai schemas**: paste any fal.ai model ID — PikoChan fetches the OpenAPI schema and adapts request fields, voice options, and parameters automatically
+- **Heartbeat**: background awareness loop (frontmost app, idle time, time-of-day), proactive nudges
+- **Config commands**: LLM can schedule nudges and adjust behavior via response parsing
+- **Voice settings UI**: full Settings → Voice tab with provider pickers, voice/model catalogs, shared API keys, Test TTS
+- **Mic entitlement**: `com.apple.security.device.audio-input` + native permission flow
 
-### v0.5.0 — Voice & Skills
+**Remaining:**
+- **Terminal control**: detect running terminals, type commands via AppleScript
+- **Browser automation**: open URLs, execute JavaScript, read page content
+- **Screen reading**: Accessibility API integration for frontmost app context
+- **Local STT/TTS**: on-device transcription and speech synthesis via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) or Whisper (MLX)
+- **Streaming TTS**: sentence-by-sentence synthesis to eliminate the delay between text and voice
+- **Voice quality tuning**: extensive testing across TTS models, voices, and emotion settings to find PikoChan's signature voice
 
-Give PikoChan a voice and the ability to learn new tricks.
+### v0.5.0 — Skills
 
-- **Speech-to-text**: on-device transcription via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) or Whisper (MLX). The listening state becomes functional
-- **Text-to-speech**: local voice synthesis with sherpa-onnx or MLX TTS models. Optional premium voice via ElevenLabs
+Teach PikoChan new tricks.
+
 - **Skills loader**: PikoChan scans `~/.pikochan/skills/` for Markdown files with YAML frontmatter. Each file teaches her a new ability
 - **Built-in skills**: terminal helper, browser automation, weather check
 - **MCP client**: connect to external tool servers via the [official Swift MCP SDK](https://github.com/modelcontextprotocol/swift-sdk)
@@ -323,12 +343,20 @@ PikoChan/
 │       ├── ArcticEmbedXS.mlpackage  # Snowflake Arctic Embed XS (384-dim, 22M params, CoreML)
 │       └── arctic_vocab.txt         # BERT WordPiece vocabulary (30522 tokens)
 ├── Core/
-│   ├── NotchManager.swift         # State machine, mouse monitors, panel management
+│   ├── NotchManager.swift         # State machine, mouse monitors, panel management, voice orchestration
 │   ├── NotchState.swift           # Six-state enum (hidden, hovered, expanded, typing, listening, setup)
 │   ├── SetupManager.swift         # First-time setup wizard state + validation + migration
 │   ├── PikoSettings.swift         # Observable settings store backed by UserDefaults
 │   ├── PikoHTTPServer.swift       # NWListener HTTP server (port 7878), all API endpoints
+│   ├── PikoHeartbeat.swift        # Background awareness loop (frontmost app, idle, time-of-day)
 │   ├── SettingsWindowController.swift  # Native settings window with toolbar tabs
+│   ├── Voice/
+│   │   ├── PikoAudioCapture.swift     # AVAudioEngine mic → 16kHz mono WAV
+│   │   ├── PikoSTT.swift              # Cloud STT (Groq, OpenAI, Deepgram)
+│   │   ├── PikoTTS.swift              # Cloud TTS (OpenAI, ElevenLabs, Fish Audio, Cartesia, fal.ai)
+│   │   ├── PikoVoiceConfig.swift      # Voice config struct + YAML loader
+│   │   ├── PikoVoiceConfigStore.swift # Observable voice config for settings UI
+│   │   └── FalAISchema.swift          # Dynamic fal.ai OpenAPI schema fetcher
 │   └── Brain/
 │       ├── PikoBrain.swift        # LLM orchestrator — multi-provider, streaming, history
 │       ├── PikoSoul.swift         # Personality YAML → system prompt + post-history reminder
@@ -357,6 +385,8 @@ PikoChan/
 │   └── Settings/
 │       ├── AIModelTab.swift       # Provider picker, model config, connection test
 │       ├── SoulTab.swift          # Personality editing + memory management + re-run setup
+│       ├── VoiceTab.swift         # TTS/STT provider config, voice pickers, test button
+│       ├── AwarenessTab.swift     # Heartbeat/awareness settings
 │       ├── AppearanceTab.swift
 │       ├── BehaviorTab.swift
 │       ├── NotchTuneTab.swift
@@ -367,6 +397,8 @@ PikoChan/
     ├── PikoTextField.swift        # NSViewRepresentable text fields (plain + bullet-masked secure)
     ├── PikoEmbedding.swift        # Arctic Embed XS (CoreML) + NLEmbedding fallback
     ├── WordPieceTokenizer.swift   # BERT WordPiece tokenizer for Arctic model
+    ├── PikoConfigCommand.swift    # Response config command parser (nudges, settings)
+    ├── PikoPathGuard.swift        # Filesystem guardrails for safe file access
     ├── NSScreen+Notch.swift       # Notch geometry detection
     └── VisualEffectView.swift     # NSVisualEffectView wrapper
 ```
@@ -381,7 +413,8 @@ All PikoChan configuration lives in `~/.pikochan/` as plain text files:
 ~/.pikochan/
 ├── config.yaml               # LLM provider, model, gateway_port, fallback settings
 ├── soul/
-│   └── personality.yaml      # Traits, communication style, sass level, rules
+│   ├── personality.yaml      # Traits, communication style, sass level, rules
+│   └── voice.yaml            # TTS/STT provider, model, voice ID, speed, auto-speak
 ├── memory/
 │   ├── pikochan.db           # SQLite database (chat history + memories)
 │   └── journal.md            # What PikoChan remembers (human-readable)
@@ -399,8 +432,12 @@ Everything is human-readable, git-friendly, and portable. Copy the folder to a n
 |-----------|-----------|-------|
 | UI Framework | Swift / SwiftUI / AppKit | Native macOS, zero web dependencies |
 | LLM (local) | Ollama HTTP API | Any Ollama-compatible model |
-| LLM (cloud) | OpenAI / Anthropic APIs | API keys stored in macOS Keychain |
+| LLM (cloud) | OpenAI / Anthropic / Groq / Gemini / Mistral / DeepSeek / xAI | API keys stored in macOS Keychain |
 | LLM (on-device) | Apple FoundationModels | macOS 26+ experimental |
+| STT (cloud) | Groq Whisper / OpenAI Whisper / Deepgram Nova-2 | Multipart WAV upload |
+| TTS (cloud) | OpenAI / ElevenLabs / Fish Audio / Cartesia / fal.ai | Dynamic model schemas for fal.ai |
+| Audio capture | AVAudioEngine | 16kHz mono Float32, WAV encoding |
+| Audio playback | AVAudioPlayer | File-based, format auto-detection |
 | Embeddings | Snowflake Arctic Embed XS (CoreML) | 384-dim, 22M params, on-device |
 | Embedding fallback | Apple NLEmbedding | 512-dim, built-in, lower quality |
 | Tokenizer | WordPiece (BERT-compatible) | 30522 vocab, max 128 tokens |

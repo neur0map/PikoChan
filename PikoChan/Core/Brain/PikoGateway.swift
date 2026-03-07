@@ -58,6 +58,13 @@ final class PikoGateway {
         case httpChatRequest = "http_chat_request"
         case soulEvolution = "soul_evolution"
         case extractionSkip = "extraction_skip"
+        case heartbeatTick = "heartbeat_tick"
+        case heartbeatNudge = "heartbeat_nudge"
+        case heartbeatMoodShift = "heartbeat_mood_shift"
+        case ttsStart = "tts_start"
+        case ttsEnd = "tts_end"
+        case sttStart = "stt_start"
+        case sttEnd = "stt_end"
     }
 
     enum Subsystem: String, Encodable {
@@ -68,6 +75,8 @@ final class PikoGateway {
         case config
         case ui
         case http
+        case heartbeat
+        case voice
     }
 
     // MARK: - Log Events
@@ -267,6 +276,64 @@ final class PikoGateway {
         log(type: .httpChatRequest, subsystem: .http, data: [
             "prompt": truncate(prompt, max: 500),
             "stream": String(stream),
+        ])
+    }
+
+    // MARK: - Heartbeat Events
+
+    func logHeartbeatTick(app: String, idleSeconds: Int, timeOfDay: Int) {
+        log(type: .heartbeatTick, subsystem: .heartbeat, data: [
+            "app": app,
+            "idle_seconds": String(idleSeconds),
+            "time_of_day": String(timeOfDay),
+        ])
+    }
+
+    func logHeartbeatNudge(trigger: String, message: String, app: String) {
+        log(type: .heartbeatNudge, subsystem: .heartbeat, data: [
+            "trigger": trigger,
+            "message": truncate(message, max: 500),
+            "app": app,
+        ])
+    }
+
+    func logHeartbeatMoodShift(from: String, to: String, trigger: String) {
+        log(type: .heartbeatMoodShift, subsystem: .heartbeat, data: [
+            "from": from,
+            "to": to,
+            "trigger": trigger,
+        ])
+    }
+
+    // MARK: - Voice Events
+
+    func logTTSStart(provider: String, textChars: Int) {
+        log(type: .ttsStart, subsystem: .voice, data: [
+            "provider": provider,
+            "text_chars": String(textChars),
+        ])
+    }
+
+    func logTTSEnd(provider: String, durationMs: Int, audioBytes: Int) {
+        log(type: .ttsEnd, subsystem: .voice, data: [
+            "provider": provider,
+            "duration_ms": String(durationMs),
+            "audio_bytes": String(audioBytes),
+        ])
+    }
+
+    func logSTTStart(provider: String, audioBytes: Int) {
+        log(type: .sttStart, subsystem: .voice, data: [
+            "provider": provider,
+            "audio_bytes": String(audioBytes),
+        ])
+    }
+
+    func logSTTEnd(provider: String, durationMs: Int, transcript: String) {
+        log(type: .sttEnd, subsystem: .voice, data: [
+            "provider": provider,
+            "duration_ms": String(durationMs),
+            "transcript": truncate(transcript, max: 500),
         ])
     }
 

@@ -171,5 +171,24 @@ enum PikoPathGuard {
     You can read files in ~/Desktop, ~/Documents, ~/Downloads for context. \
     You CANNOT modify your own app bundle, source code, Xcode projects, or system files. \
     If asked to do something outside your boundaries, explain what you can and can't do.
+
+    HEARTBEAT SYSTEM: You have a background heartbeat that watches the Mac environment \
+    (frontmost app, idle time, time of day). You can configure it and schedule nudges. \
+    To change your config or schedule a nudge, include config tags in your reply \
+    (they are invisible to the user — they get stripped before display):
+      [config:heartbeat_enabled=true] — turn heartbeat on/off
+      [config:heartbeat_interval=30] — tick interval in seconds (min 15)
+      [config:heartbeat_nudges_enabled=true] — enable/disable proactive nudges
+      [config:nudge_long_idle=true] — nudge after 2hr idle
+      [config:nudge_late_night=true] — nudge during 1-4am
+      [config:nudge_marathon=true] — nudge after 4hr session
+      [config:quiet_hours_start=23] — quiet hours start (0-23)
+      [config:quiet_hours_end=7] — quiet hours end (0-23)
+      [nudge_after:SECONDS:MESSAGE] — one-shot: show MESSAGE after SECONDS
+    Example: User says "remind me to stretch in 60 seconds". You reply: \
+    "[nudge_after:60:Time to stretch! Your body will thank you~] Sure, I'll poke you in a minute!"
+    The [nudge_after:...] tag is stripped — user only sees "Sure, I'll poke you in a minute!" \
+    Then after 60 seconds you automatically pop up with the message.
+    You can combine multiple tags in one reply.
     """
 }

@@ -74,7 +74,7 @@ struct NotchContentView: View {
 
     private var listeningNaturalHeight: CGFloat {
         let top = manager.notchSize.height + settings.contentPadding
-        let body = settings.spriteSize + 6 + 28 + 6 + 28 + 12 + responseBlockHeight
+        let body = settings.spriteSize + 6 + 28 + 2 + 44 + 12 + responseBlockHeight
         return top + body
     }
 
@@ -148,9 +148,7 @@ struct NotchContentView: View {
                     }
 
                     if manager.state == .listening {
-                        ListeningView(
-                            onStopTapped: { manager.transition(to: .expanded) }
-                        )
+                        ListeningView(manager: manager)
                         .padding(.top, 6)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 12)

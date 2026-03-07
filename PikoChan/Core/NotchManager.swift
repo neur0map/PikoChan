@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import SwiftUI
 import Observation
 
@@ -65,6 +66,19 @@ final class NotchManager {
     private var panelSize: CGSize = .zero
     private var moodImages: [Mood: NSImage] = [:]
     let brain: PikoBrain
+    /// Set by AppDelegate after heartbeat is created, so config commands can schedule nudges.
+    var heartbeat: PikoHeartbeat?
+
+    // MARK: - Voice
+
+    var voiceCapture: PikoAudioCapture?
+    var stt: PikoSTT?
+    var tts: PikoTTS?
+    var isRecording: Bool = false
+    var isSpeaking: Bool = false
+    private var lastInputWasVoice: Bool = false
+    private var audioPlayer: AVAudioPlayer?
+    private var currentAudioTmpFile: URL?
 
     init(brain: PikoBrain) {
         self.brain = brain
@@ -232,7 +246,7 @@ final class NotchManager {
         let sprite = PikoSettings.shared.spriteSize
         let expandedHeight = notchSize.height + pad + sprite + 12 + 36 + 16 + responseBlockHeight
         let typingHeight = notchSize.height + pad + sprite + 8 + 34 + 12 + responseBlockHeight
-        let listeningHeight = notchSize.height + pad + sprite + 6 + 28 + 6 + 28 + 12 + responseBlockHeight
+        let listeningHeight = notchSize.height + pad + sprite + 6 + 28 + 2 + 44 + 12 + responseBlockHeight
         return max(expandedHeight, max(typingHeight, listeningHeight))
     }
 
@@ -287,10 +301,18 @@ final class NotchManager {
             panel?.styleMask.insert(.nonactivatingPanel)
             panel?.syncActivationState()
 
-        case .expanded, .listening:
+        case .expanded:
             panel?.ignoresMouseEvents = false
             panel?.styleMask.insert(.nonactivatingPanel)
             panel?.syncActivationState()
+            panel?.makeKey()
+
+        case .listening:
+            // Mic capture needs activation (same as .typing).
+            panel?.ignoresMouseEvents = false
+            panel?.styleMask.remove(.nonactivatingPanel)
+            panel?.syncActivationState()
+            NSApp.activate()
             panel?.makeKey()
 
         case .typing, .setup:
@@ -402,6 +424,22 @@ final class NotchManager {
                 self.lastResponseText = rawAccumulated
             }
 
+            // Parse config commands + scheduled nudges from response.
+            if !self.lastResponseText.isEmpty {
+                let parsed = PikoConfigCommand.parse(from: self.lastResponseText)
+                self.lastResponseText = parsed.cleanText
+                PikoConfigCommand.applyConfigChanges(parsed.configChanges)
+                if let nudge = parsed.scheduledNudge {
+                    self.heartbeat?.scheduleNudge(
+                        afterSeconds: nudge.delaySeconds,
+                        message: nudge.message
+                    )
+                }
+
+                // Auto-speak response if voice TTS is enabled.
+                self.speakIfEnabled(self.lastResponseText)
+            }
+
             if !Task.isCancelled {
                 if !hasContent && self.lastResponseError == nil {
                     self.setError(message: "Model returned nothing", suggestion: "Try a different prompt or model")
@@ -473,6 +511,194 @@ final class NotchManager {
         currentResponseTask?.cancel()
         currentResponseTask = nil
         isResponding = false
+    }
+
+    // MARK: - Voice
+
+    func startRecording() {
+        guard !isRecording else { return }
+
+        // Stop any ongoing TTS playback.
+        stopSpeaking()
+
+        Task {
+            guard let capture = voiceCapture else { return }
+
+            // Check + request permission.
+            if !capture.hasPermission {
+                let status = capture.currentPermissionStatus
+                if status == .denied {
+                    // Already denied — open System Settings directly.
+                    openMicrophoneSettings()
+                    return
+                }
+                // Lower panel so macOS permission dialog is clickable.
+                let panel = self.panel
+                panel?.level = .floating
+                // Not determined — triggers the native permission dialog.
+                let granted = await capture.requestPermission()
+                panel?.level = .screenSaver
+                guard granted else {
+                    PikoGateway.shared.logError(message: "Microphone permission denied", subsystem: .voice)
+                    openMicrophoneSettings()
+                    return
+                }
+            }
+
+            do {
+                try capture.startCapture()
+                isRecording = true
+            } catch {
+                PikoGateway.shared.logError(
+                    message: "Failed to start audio capture: \(error.localizedDescription)",
+                    subsystem: .voice
+                )
+                setError(message: "Can't access microphone", suggestion: error.localizedDescription)
+            }
+        }
+    }
+
+    private func openMicrophoneSettings() {
+        // Collapse so the user can interact with System Settings.
+        transition(to: .expanded)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func stopRecordingAndTranscribe() {
+        guard isRecording else { return }
+        isRecording = false
+
+        guard let audioData = voiceCapture?.stopCapture(), !audioData.isEmpty else {
+            return
+        }
+
+        let voiceConfig = PikoVoiceConfigStore.shared.currentConfig
+        guard voiceConfig.sttProvider != .none else {
+            setError(message: "No STT provider configured", suggestion: "Set one in Settings → Voice")
+            return
+        }
+
+        // Show transcribing state.
+        isResponding = true
+        lastResponseText = ""
+        lastResponseError = nil
+        transition(to: .expanded)
+
+        Task {
+            do {
+                guard let stt else { return }
+                let transcript = try await stt.transcribe(audioData: audioData, config: voiceConfig)
+                guard !transcript.isEmpty else {
+                    self.isResponding = false
+                    return
+                }
+                self.isResponding = false
+                self.lastInputWasVoice = true
+                inputText = transcript
+                submitTextInput()
+            } catch {
+                self.isResponding = false
+                setError(message: "STT failed", suggestion: error.localizedDescription)
+                PikoGateway.shared.logError(
+                    message: "STT failed: \(error.localizedDescription)",
+                    subsystem: .voice
+                )
+            }
+        }
+    }
+
+    func speakIfEnabled(_ text: String) {
+        let voiceConfig = PikoVoiceConfigStore.shared.currentConfig
+        guard voiceConfig.ttsProvider != .none else { return }
+        // Always speak when input was voice; otherwise respect autoSpeak toggle.
+        let shouldSpeak = lastInputWasVoice || voiceConfig.autoSpeak
+        lastInputWasVoice = false
+        guard shouldSpeak else { return }
+        speak(text, config: voiceConfig)
+    }
+
+    func speak(_ text: String, config: PikoVoiceConfig? = nil) {
+        let voiceConfig = config ?? PikoVoiceConfigStore.shared.currentConfig
+        guard voiceConfig.ttsProvider != .none else { return }
+
+        Task {
+            do {
+                guard let tts else { return }
+                isSpeaking = true
+                // Pass current mood so TTS models with emotion support can use it.
+                tts.moodHint = Self.moodToEmotionPrompt(currentMood)
+                let audioData = try await tts.synthesize(text: text, config: voiceConfig)
+
+                // Write to temp file with correct extension — AVAudioPlayer
+                // is more reliable reading from a file than raw Data on macOS.
+                let ext = Self.audioFileExtension(for: audioData)
+                let tmpFile = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString + ".\(ext)")
+                try audioData.write(to: tmpFile)
+
+                let player = try AVAudioPlayer(contentsOf: tmpFile)
+                player.volume = 1.0
+                player.prepareToPlay()
+                self.audioPlayer = player
+                self.currentAudioTmpFile = tmpFile
+
+                guard player.play() else {
+                    throw PikoVoiceError.ttsFailed(detail: "AVAudioPlayer.play() returned false")
+                }
+
+                while player.isPlaying {
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+                isSpeaking = false
+                cleanupAudioPlayer()
+            } catch {
+                isSpeaking = false
+                cleanupAudioPlayer()
+                PikoGateway.shared.logError(
+                    message: "TTS playback failed: \(error.localizedDescription)",
+                    subsystem: .voice
+                )
+            }
+        }
+    }
+
+    private func stopSpeaking() {
+        audioPlayer?.stop()
+        cleanupAudioPlayer()
+        isSpeaking = false
+    }
+
+    private func cleanupAudioPlayer() {
+        audioPlayer = nil
+        if let file = currentAudioTmpFile {
+            try? FileManager.default.removeItem(at: file)
+            currentAudioTmpFile = nil
+        }
+    }
+
+    /// Detect audio format from magic bytes for correct temp file extension.
+    private static func audioFileExtension(for data: Data) -> String {
+        guard data.count >= 4 else { return "mp3" }
+        let header = [UInt8](data.prefix(4))
+        if header[0] == 0x52, header[1] == 0x49, header[2] == 0x46, header[3] == 0x46 { return "wav" }  // RIFF
+        if header[0] == 0x4F, header[1] == 0x67, header[2] == 0x67, header[3] == 0x53 { return "ogg" }  // OggS
+        if header[0] == 0x66, header[1] == 0x4C, header[2] == 0x61, header[3] == 0x43 { return "flac" } // fLaC
+        return "mp3"
+    }
+
+    /// Convert PikoChan's mood enum to a natural emotion prompt for TTS models.
+    private static func moodToEmotionPrompt(_ mood: Mood) -> String {
+        switch mood {
+        case .neutral:     "Calm and conversational."
+        case .playful:     "Playful and energetic."
+        case .irritated:   "Slightly annoyed and impatient."
+        case .proud:       "Proud and confident."
+        case .concerned:   "Concerned and worried."
+        case .snarky:      "Sarcastic and witty."
+        case .encouraging: "Warm, encouraging, and supportive."
+        }
     }
 
     private func resetMoodDecay() {
@@ -599,7 +825,15 @@ final class NotchManager {
             case .setup:
                 // Don't dismiss setup on escape.
                 return nil
-            case .typing, .listening:
+            case .typing:
+                self.transition(to: .expanded)
+                return nil
+            case .listening:
+                // Stop recording without transcribing on escape.
+                if self.isRecording {
+                    self.isRecording = false
+                    _ = self.voiceCapture?.stopCapture()
+                }
                 self.transition(to: .expanded)
                 return nil
             case .expanded, .hovered:
@@ -682,12 +916,12 @@ final class NotchManager {
                 }
             }
 
-        case .typing, .setup:
-            // Never toggle ignoresMouseEvents during typing/setup — it steals
-            // focus from the text field.
+        case .typing, .listening, .setup:
+            // Never toggle ignoresMouseEvents during typing/listening/setup — it steals
+            // focus from the text field or mic.
             break
 
-        case .expanded, .listening:
+        case .expanded:
             // Dynamically toggle mouse passthrough so areas outside the content
             // don't block other windows.
             if let panel {

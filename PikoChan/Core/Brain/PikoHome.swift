@@ -70,6 +70,14 @@ vllm_model: NousResearch/Meta-Llama-3-8B-Instruct
 vllm_endpoint: http://localhost:8000
 gateway_port: 7878
 setup_complete: false
+heartbeat_enabled: true
+heartbeat_interval: 60
+heartbeat_nudges_enabled: false
+nudge_long_idle: true
+nudge_late_night: true
+nudge_marathon: false
+quiet_hours_start: 23
+quiet_hours_end: 7
 # API keys are stored securely in macOS Keychain.
 # Configure them in Settings → AI Model.
 """
@@ -101,8 +109,14 @@ decay_rate: 0.1
 """
 
     static let defaultVoiceYAML = """
-provider: local
-enabled: false
+tts_provider: none
+tts_voice_id: alloy
+tts_model: tts-1
+tts_speed: 1.0
+auto_speak: false
+stt_provider: none
+stt_model: whisper-large-v3-turbo
+stt_language: en
 """
 
     static let defaultTerminalSkill = """

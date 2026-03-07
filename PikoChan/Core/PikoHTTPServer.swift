@@ -16,6 +16,8 @@ final class PikoHTTPServer {
 
     /// Callback to set the notch UI mood from HTTP (optional).
     var moodSetter: ((NotchManager.Mood) -> Void)?
+    /// Set by AppDelegate so config commands can schedule nudges via HTTP too.
+    var heartbeat: PikoHeartbeat?
 
     init(brain: PikoBrain, port: UInt16, moodSetter: ((NotchManager.Mood) -> Void)? = nil) {
         self.brain = brain
@@ -260,6 +262,19 @@ final class PikoHTTPServer {
             fullResponse = clean
         }
 
+        // Parse config commands + scheduled nudges from response.
+        if !fullResponse.isEmpty {
+            let cmdResult = PikoConfigCommand.parse(from: fullResponse)
+            fullResponse = cmdResult.cleanText
+            PikoConfigCommand.applyConfigChanges(cmdResult.configChanges)
+            if let nudge = cmdResult.scheduledNudge {
+                self.heartbeat?.scheduleNudge(
+                    afterSeconds: nudge.delaySeconds,
+                    message: nudge.message
+                )
+            }
+        }
+
         let json: [String: Any] = [
             "response": fullResponse,
             "mood": (moodParsed ?? mood).rawValue.lowercased(),
@@ -309,6 +324,19 @@ final class PikoHTTPServer {
         if !moodParsed && !rawAccumulated.isEmpty {
             fullResponse = rawAccumulated
             sendSSEChunk(connection: connection, chunk: rawAccumulated, done: false)
+        }
+
+        // Parse config commands + scheduled nudges from response.
+        if !fullResponse.isEmpty {
+            let cmdResult = PikoConfigCommand.parse(from: fullResponse)
+            fullResponse = cmdResult.cleanText
+            PikoConfigCommand.applyConfigChanges(cmdResult.configChanges)
+            if let nudge = cmdResult.scheduledNudge {
+                self.heartbeat?.scheduleNudge(
+                    afterSeconds: nudge.delaySeconds,
+                    message: nudge.message
+                )
+            }
         }
 
         // Final done event.

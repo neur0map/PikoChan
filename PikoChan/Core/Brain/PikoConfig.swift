@@ -43,6 +43,14 @@ struct PikoConfig {
     var vllmAPIKey: String?
     var gatewayPort: UInt16
     var setupComplete: Bool
+    var heartbeatEnabled: Bool
+    var heartbeatInterval: Int
+    var heartbeatNudgesEnabled: Bool
+    var nudgeLongIdle: Bool
+    var nudgeLateNight: Bool
+    var nudgeMarathon: Bool
+    var quietHoursStart: Int
+    var quietHoursEnd: Int
 
     static let `default` = PikoConfig(
         provider: .local,
@@ -65,7 +73,15 @@ struct PikoConfig {
         vllmEndpoint: URL(string: "http://localhost:8000")!,
         vllmAPIKey: nil,
         gatewayPort: 7878,
-        setupComplete: false
+        setupComplete: false,
+        heartbeatEnabled: true,
+        heartbeatInterval: 60,
+        heartbeatNudgesEnabled: false,
+        nudgeLongIdle: true,
+        nudgeLateNight: true,
+        nudgeMarathon: false,
+        quietHoursStart: 23,
+        quietHoursEnd: 7
     )
 }
 
@@ -106,6 +122,15 @@ enum PikoConfigLoader {
 
         let setupComplete = (map["setup_complete"] ?? "") == "true"
 
+        let heartbeatEnabled = (map["heartbeat_enabled"] ?? "true") == "true"
+        let heartbeatInterval = Int(map["heartbeat_interval"] ?? "60") ?? 60
+        let heartbeatNudgesEnabled = (map["heartbeat_nudges_enabled"] ?? "false") == "true"
+        let nudgeLongIdle = (map["nudge_long_idle"] ?? "true") == "true"
+        let nudgeLateNight = (map["nudge_late_night"] ?? "true") == "true"
+        let nudgeMarathon = (map["nudge_marathon"] ?? "false") == "true"
+        let quietHoursStart = Int(map["quiet_hours_start"] ?? "23") ?? 23
+        let quietHoursEnd = Int(map["quiet_hours_end"] ?? "7") ?? 7
+
         return PikoConfig(
             provider: provider,
             localModel: localModel,
@@ -127,7 +152,15 @@ enum PikoConfigLoader {
             vllmEndpoint: vllmEndpoint,
             vllmAPIKey: vllmAPIKey,
             gatewayPort: gatewayPort,
-            setupComplete: setupComplete
+            setupComplete: setupComplete,
+            heartbeatEnabled: heartbeatEnabled,
+            heartbeatInterval: heartbeatInterval,
+            heartbeatNudgesEnabled: heartbeatNudgesEnabled,
+            nudgeLongIdle: nudgeLongIdle,
+            nudgeLateNight: nudgeLateNight,
+            nudgeMarathon: nudgeMarathon,
+            quietHoursStart: quietHoursStart,
+            quietHoursEnd: quietHoursEnd
         )
     }
 
