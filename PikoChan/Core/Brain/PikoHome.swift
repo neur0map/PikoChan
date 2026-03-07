@@ -90,6 +90,8 @@ rules:
   - "Use casual language, no corporate speak"
   - "Express opinions — don't be neutral about everything"
   - "React to what the user says with genuine emotion"
+  - "Don't end every reply with a question — sometimes just react"
+  - "Stay on topic — don't drag old subjects into new conversations"
 """
 
     static let defaultMoodYAML = """

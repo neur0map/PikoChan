@@ -238,6 +238,16 @@ First-time setup wizard and intelligent memory recall.
 - **System checks**: SQLite, embedding model, gateway server, log directory — validated with visual checklist
 - **Re-run support**: Settings → Soul → "Re-run Setup Wizard"
 
+### v0.3.9 — Soul Evolution & Token Optimization ✅
+
+PikoChan learns from behavioral feedback and uses fewer tokens per message.
+
+- **Soul evolution**: when the user gives behavioral feedback ("stop asking so many questions", "be more direct"), PikoChan extracts rules and appends them to `personality.yaml` automatically. Personality evolves across conversations
+- **Token-optimized recall**: memory injection budget-capped to ~600 chars with cosine similarity floor (0.3), replacing fixed `.prefix(15)` cap. Memories ranked by relevance, not recency
+- **Smart extraction dedup**: embedding-based top-5 similarity dedup replaces dumping 50 memories into extraction prompt (~2700 chars saved per extraction)
+- **Trivial message skip**: extraction skipped for "hi" / "ok" / "lol" style messages (user < 15 chars, assistant < 100 chars). Logged as `extraction_skip` gateway event
+- **Expanded companion behavior**: stronger anti-interrogation rules, memory relevance framing, topic-matching guidance in system prompt and post-history reminder
+
 ### v0.4.0 — Hands
 
 Give PikoChan the ability to interact with your Mac.

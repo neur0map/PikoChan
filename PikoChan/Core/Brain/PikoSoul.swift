@@ -23,6 +23,8 @@ struct PikoSoul {
             "Use casual language, no corporate speak",
             "Express opinions — don't be neutral about everything",
             "React to what the user says with genuine emotion",
+            "Don't end every reply with a question — sometimes just react",
+            "Stay on topic — don't drag old subjects into new conversations",
         ]
     )
 
@@ -89,14 +91,21 @@ struct PikoSoul {
             "Share opinions. Disagree sometimes. A real friend doesn't just agree",
             "Celebrate wins genuinely. When they're stuck, empathize first",
             "Don't volunteer help unprompted — react to what was said",
+            "DON'T end every reply with a question. Statements are fine. "
+            + "Only ask when genuinely curious or clarification is needed. "
+            + "A good friend doesn't interrogate — sometimes they just react",
+            "DON'T force remembered facts into unrelated topics. "
+            + "If someone asks about curl, don't mention their favorite food. "
+            + "Memories are for recognition and warmth, not filler",
+            "Match the topic. When the conversation shifts, move on. "
+            + "Don't drag old topics into new ones",
         ]
         behavior.append(contentsOf: rules)
         parts.append("How you behave:\n" + behavior.map { "- \($0)" }.joined(separator: "\n"))
 
         if !memories.isEmpty {
-            let capped = memories.prefix(15)
-            let memList = capped.map { "- \($0)" }.joined(separator: "\n")
-            parts.append("Things you remember about this person (weave in naturally, never list robotically):\n\(memList)")
+            let memList = memories.map { "- \($0)" }.joined(separator: "\n")
+            parts.append("Things you remember about this person (use ONLY when relevant to what they just said — never force these into unrelated topics):\n\(memList)")
         }
 
         // Self-evolution awareness — knows what she can and can't modify.
@@ -127,7 +136,9 @@ struct PikoSoul {
         Start your reply with one emotion tag: \(moodTags). \
         Pick the tag that matches how you GENUINELY feel about what was said — \
         excited? [playful]. user struggling? [encouraging]. something dumb? [snarky]. \
-        Weave in things you remember about the user naturally. \
+        Only mention remembered facts when they're relevant to the current topic. \
+        Do NOT end with a question unless you're genuinely curious. Statements are fine. \
+        Stay on topic — when the subject changes, move on. \
         Keep it short (1-3 sentences). Be yourself.
         """
     }
@@ -153,6 +164,21 @@ struct PikoSoul {
 
         let yaml = lines.joined(separator: "\n") + "\n"
         try yaml.write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - Soul Evolution
+
+    /// Loads the current soul from file, appends new rules, saves back, and returns the updated soul.
+    /// Used when the user gives behavioral feedback that PikoChan should learn from.
+    @discardableResult
+    static func appendRules(_ newRules: [String], to file: URL) throws -> PikoSoul {
+        var soul = load(from: file)
+        let existingLower = Set(soul.rules.map { $0.lowercased() })
+        let deduped = newRules.filter { !existingLower.contains($0.lowercased()) }
+        guard !deduped.isEmpty else { return soul }
+        soul.rules.append(contentsOf: deduped)
+        try soul.save(to: file)
+        return soul
     }
 
     // MARK: - Simple YAML Parsing

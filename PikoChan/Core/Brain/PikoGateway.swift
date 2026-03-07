@@ -56,6 +56,8 @@ final class PikoGateway {
         case httpRequest = "http_request"
         case httpResponse = "http_response"
         case httpChatRequest = "http_chat_request"
+        case soulEvolution = "soul_evolution"
+        case extractionSkip = "extraction_skip"
     }
 
     enum Subsystem: String, Encodable {
@@ -212,6 +214,30 @@ final class PikoGateway {
                 "prompt_chars": String(promptChars),
                 "response_chars": String(responseChars),
                 "duration_ms": String(durationMs),
+            ]
+        )
+    }
+
+    func logSoulEvolution(rules: [String], trigger: String) {
+        log(
+            type: .soulEvolution,
+            subsystem: .brain,
+            data: [
+                "rules_added": rules.joined(separator: " | "),
+                "count": String(rules.count),
+                "trigger": truncate(trigger, max: 500),
+            ]
+        )
+    }
+
+    func logExtractionSkip(reason: String, userChars: Int, assistantChars: Int) {
+        log(
+            type: .extractionSkip,
+            subsystem: .memory,
+            data: [
+                "reason": reason,
+                "user_chars": String(userChars),
+                "assistant_chars": String(assistantChars),
             ]
         )
     }
