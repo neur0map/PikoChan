@@ -33,6 +33,16 @@ struct SetupProviderConfigStep: View {
             apiKeyContent(provider: "Anthropic")
         case .apple:
             appleContent
+        case .openrouter:
+            apiKeyContent(provider: "OpenRouter")
+        case .groq:
+            apiKeyContent(provider: "Groq")
+        case .huggingface:
+            apiKeyContent(provider: "HuggingFace")
+        case .dockerModelRunner:
+            localEndpointContent(provider: "Docker Model Runner", defaultEndpoint: "http://localhost:12434")
+        case .vllm:
+            localEndpointContent(provider: "vLLM", defaultEndpoint: "http://localhost:8000")
         }
     }
 
@@ -122,6 +132,33 @@ struct SetupProviderConfigStep: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.white.opacity(0.4))
                 .multilineTextAlignment(.center)
+        }
+    }
+
+    // MARK: - Local Endpoint
+
+    @ViewBuilder
+    private func localEndpointContent(provider: String, defaultEndpoint: String) -> some View {
+        Text("Checking \(provider)...")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.white.opacity(0.7))
+
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Endpoint (default: \(defaultEndpoint))")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.4))
+            SetupTextField(placeholder: defaultEndpoint, text: $setup.customEndpoint, isSecure: false) {
+                Task { await setup.validateProvider() }
+            }
+            .padding(.horizontal, 4)
+        }
+
+        validationStatus
+
+        if setup.providerValidation != .testing {
+            SetupActionButton("Test Connection", icon: "bolt") {
+                Task { await setup.validateProvider() }
+            }
         }
     }
 

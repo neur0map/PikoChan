@@ -16,6 +16,17 @@ final class PikoConfigStore {
     var anthropicModel: String = "claude-3-5-haiku-latest"
     var openAIAPIKey: String = ""
     var anthropicAPIKey: String = ""
+    var openRouterModel: String = "openai/gpt-4o-mini"
+    var openRouterAPIKey: String = ""
+    var groqModel: String = "llama-3.3-70b-versatile"
+    var groqAPIKey: String = ""
+    var huggingFaceModel: String = "meta-llama/Llama-3-70b"
+    var huggingFaceAPIKey: String = ""
+    var dockerModelRunnerModel: String = "ai/smollm2"
+    var dockerModelRunnerEndpoint: String = "http://localhost:12434"
+    var vllmModel: String = "NousResearch/Meta-Llama-3-8B-Instruct"
+    var vllmEndpoint: String = "http://localhost:8000"
+    var vllmAPIKey: String = ""
     var setupComplete: Bool = false
 
     private init() {
@@ -36,9 +47,20 @@ final class PikoConfigStore {
         cloudFallback = cfg.cloudFallback
         openAIModel = cfg.openAIModel
         anthropicModel = cfg.anthropicModel
+        openRouterModel = cfg.openRouterModel
+        groqModel = cfg.groqModel
+        huggingFaceModel = cfg.huggingFaceModel
+        dockerModelRunnerModel = cfg.dockerModelRunnerModel
+        dockerModelRunnerEndpoint = cfg.dockerModelRunnerEndpoint.absoluteString
+        vllmModel = cfg.vllmModel
+        vllmEndpoint = cfg.vllmEndpoint.absoluteString
         // API keys come from Keychain, not YAML.
         openAIAPIKey = PikoKeychain.load(account: "openai_api_key") ?? ""
         anthropicAPIKey = PikoKeychain.load(account: "anthropic_api_key") ?? ""
+        openRouterAPIKey = PikoKeychain.load(account: "openrouter_api_key") ?? ""
+        groqAPIKey = PikoKeychain.load(account: "groq_api_key") ?? ""
+        huggingFaceAPIKey = PikoKeychain.load(account: "huggingface_api_key") ?? ""
+        vllmAPIKey = PikoKeychain.load(account: "vllm_api_key") ?? ""
         setupComplete = cfg.setupComplete
     }
 
@@ -53,25 +75,34 @@ local_endpoint: \(localEndpoint.trimmingCharacters(in: .whitespacesAndNewlines))
 cloud_fallback: \(cloudFallback.rawValue)
 openai_model: \(openAIModel.trimmingCharacters(in: .whitespacesAndNewlines))
 anthropic_model: \(anthropicModel.trimmingCharacters(in: .whitespacesAndNewlines))
+openrouter_model: \(openRouterModel.trimmingCharacters(in: .whitespacesAndNewlines))
+groq_model: \(groqModel.trimmingCharacters(in: .whitespacesAndNewlines))
+huggingface_model: \(huggingFaceModel.trimmingCharacters(in: .whitespacesAndNewlines))
+docker_model_runner_model: \(dockerModelRunnerModel.trimmingCharacters(in: .whitespacesAndNewlines))
+docker_model_runner_endpoint: \(dockerModelRunnerEndpoint.trimmingCharacters(in: .whitespacesAndNewlines))
+vllm_model: \(vllmModel.trimmingCharacters(in: .whitespacesAndNewlines))
+vllm_endpoint: \(vllmEndpoint.trimmingCharacters(in: .whitespacesAndNewlines))
 setup_complete: \(setupComplete ? "true" : "false")
 """
 
         try yaml.write(to: home.configFile, atomically: true, encoding: .utf8)
 
         // Save API keys to Keychain.
-        let trimmedOpenAI = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedAnthropic = anthropicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if trimmedOpenAI.isEmpty {
-            PikoKeychain.delete(account: "openai_api_key")
-        } else {
-            PikoKeychain.save(account: "openai_api_key", value: trimmedOpenAI)
-        }
-
-        if trimmedAnthropic.isEmpty {
-            PikoKeychain.delete(account: "anthropic_api_key")
-        } else {
-            PikoKeychain.save(account: "anthropic_api_key", value: trimmedAnthropic)
+        let keychainEntries: [(account: String, value: String)] = [
+            ("openai_api_key", openAIAPIKey),
+            ("anthropic_api_key", anthropicAPIKey),
+            ("openrouter_api_key", openRouterAPIKey),
+            ("groq_api_key", groqAPIKey),
+            ("huggingface_api_key", huggingFaceAPIKey),
+            ("vllm_api_key", vllmAPIKey),
+        ]
+        for entry in keychainEntries {
+            let trimmed = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                PikoKeychain.delete(account: entry.account)
+            } else {
+                PikoKeychain.save(account: entry.account, value: trimmed)
+            }
         }
     }
 
@@ -100,6 +131,13 @@ local_endpoint: \(cfg.localEndpoint.absoluteString)
 cloud_fallback: \(cfg.cloudFallback.rawValue)
 openai_model: \(cfg.openAIModel)
 anthropic_model: \(cfg.anthropicModel)
+openrouter_model: \(cfg.openRouterModel)
+groq_model: \(cfg.groqModel)
+huggingface_model: \(cfg.huggingFaceModel)
+docker_model_runner_model: \(cfg.dockerModelRunnerModel)
+docker_model_runner_endpoint: \(cfg.dockerModelRunnerEndpoint.absoluteString)
+vllm_model: \(cfg.vllmModel)
+vllm_endpoint: \(cfg.vllmEndpoint.absoluteString)
 setup_complete: \(cfg.setupComplete ? "true" : "false")
 """
             try? yaml.write(to: home.configFile, atomically: true, encoding: .utf8)

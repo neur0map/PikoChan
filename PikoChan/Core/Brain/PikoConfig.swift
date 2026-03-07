@@ -6,12 +6,20 @@ struct PikoConfig {
         case openai
         case anthropic
         case apple
+        case openrouter
+        case groq
+        case huggingface
+        case dockerModelRunner = "docker_model_runner"
+        case vllm
     }
 
     enum CloudFallback: String {
         case none
         case openai
         case anthropic
+        case openrouter
+        case groq
+        case huggingface
     }
 
     var provider: Provider
@@ -22,6 +30,17 @@ struct PikoConfig {
     var anthropicModel: String
     var openAIAPIKey: String?
     var anthropicAPIKey: String?
+    var openRouterModel: String
+    var openRouterAPIKey: String?
+    var groqModel: String
+    var groqAPIKey: String?
+    var huggingFaceModel: String
+    var huggingFaceAPIKey: String?
+    var dockerModelRunnerModel: String
+    var dockerModelRunnerEndpoint: URL
+    var vllmModel: String
+    var vllmEndpoint: URL
+    var vllmAPIKey: String?
     var gatewayPort: UInt16
     var setupComplete: Bool
 
@@ -34,6 +53,17 @@ struct PikoConfig {
         anthropicModel: "claude-3-5-haiku-latest",
         openAIAPIKey: nil,
         anthropicAPIKey: nil,
+        openRouterModel: "openai/gpt-4o-mini",
+        openRouterAPIKey: nil,
+        groqModel: "llama-3.3-70b-versatile",
+        groqAPIKey: nil,
+        huggingFaceModel: "meta-llama/Llama-3-70b",
+        huggingFaceAPIKey: nil,
+        dockerModelRunnerModel: "ai/smollm2",
+        dockerModelRunnerEndpoint: URL(string: "http://localhost:12434")!,
+        vllmModel: "NousResearch/Meta-Llama-3-8B-Instruct",
+        vllmEndpoint: URL(string: "http://localhost:8000")!,
+        vllmAPIKey: nil,
         gatewayPort: 7878,
         setupComplete: false
     )
@@ -56,6 +86,17 @@ enum PikoConfigLoader {
         // API keys: prefer Keychain, fall back to YAML for migration.
         let openAIAPIKey = PikoKeychain.load(account: "openai_api_key") ?? map["openai_api_key"]?.nonEmpty
         let anthropicAPIKey = PikoKeychain.load(account: "anthropic_api_key") ?? map["anthropic_api_key"]?.nonEmpty
+        let openRouterModel = map["openrouter_model"]?.nonEmpty ?? PikoConfig.default.openRouterModel
+        let openRouterAPIKey = PikoKeychain.load(account: "openrouter_api_key") ?? map["openrouter_api_key"]?.nonEmpty
+        let groqModel = map["groq_model"]?.nonEmpty ?? PikoConfig.default.groqModel
+        let groqAPIKey = PikoKeychain.load(account: "groq_api_key") ?? map["groq_api_key"]?.nonEmpty
+        let huggingFaceModel = map["huggingface_model"]?.nonEmpty ?? PikoConfig.default.huggingFaceModel
+        let huggingFaceAPIKey = PikoKeychain.load(account: "huggingface_api_key") ?? map["huggingface_api_key"]?.nonEmpty
+        let dockerModelRunnerModel = map["docker_model_runner_model"]?.nonEmpty ?? PikoConfig.default.dockerModelRunnerModel
+        let dockerModelRunnerEndpoint = URL(string: map["docker_model_runner_endpoint"] ?? "") ?? PikoConfig.default.dockerModelRunnerEndpoint
+        let vllmModel = map["vllm_model"]?.nonEmpty ?? PikoConfig.default.vllmModel
+        let vllmEndpoint = URL(string: map["vllm_endpoint"] ?? "") ?? PikoConfig.default.vllmEndpoint
+        let vllmAPIKey = PikoKeychain.load(account: "vllm_api_key") ?? map["vllm_api_key"]?.nonEmpty
         let gatewayPort: UInt16 = {
             if let envPort = ProcessInfo.processInfo.environment["PIKOCHAN_PORT"],
                let port = UInt16(envPort) { return port }
@@ -74,6 +115,17 @@ enum PikoConfigLoader {
             anthropicModel: anthropicModel,
             openAIAPIKey: openAIAPIKey,
             anthropicAPIKey: anthropicAPIKey,
+            openRouterModel: openRouterModel,
+            openRouterAPIKey: openRouterAPIKey,
+            groqModel: groqModel,
+            groqAPIKey: groqAPIKey,
+            huggingFaceModel: huggingFaceModel,
+            huggingFaceAPIKey: huggingFaceAPIKey,
+            dockerModelRunnerModel: dockerModelRunnerModel,
+            dockerModelRunnerEndpoint: dockerModelRunnerEndpoint,
+            vllmModel: vllmModel,
+            vllmEndpoint: vllmEndpoint,
+            vllmAPIKey: vllmAPIKey,
             gatewayPort: gatewayPort,
             setupComplete: setupComplete
         )

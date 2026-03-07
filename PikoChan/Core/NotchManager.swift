@@ -40,10 +40,15 @@ final class NotchManager {
 
     var activeProviderLabel: String {
         switch brain.config.provider {
-        case .local:     brain.config.localModel
-        case .openai:    brain.config.openAIModel
-        case .anthropic: brain.config.anthropicModel
-        case .apple:     "Apple Intelligence"
+        case .local:              brain.config.localModel
+        case .openai:             brain.config.openAIModel
+        case .anthropic:          brain.config.anthropicModel
+        case .apple:              "Apple Intelligence"
+        case .openrouter:         brain.config.openRouterModel
+        case .groq:               brain.config.groqModel
+        case .huggingface:        brain.config.huggingFaceModel
+        case .dockerModelRunner:  brain.config.dockerModelRunnerModel
+        case .vllm:               brain.config.vllmModel
         }
     }
 

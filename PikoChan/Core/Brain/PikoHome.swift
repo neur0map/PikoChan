@@ -61,6 +61,13 @@ local_endpoint: http://127.0.0.1:11434
 cloud_fallback: none
 openai_model: gpt-4o-mini
 anthropic_model: claude-3-5-haiku-latest
+openrouter_model: openai/gpt-4o-mini
+groq_model: llama-3.3-70b-versatile
+huggingface_model: meta-llama/Llama-3-70b
+docker_model_runner_model: ai/smollm2
+docker_model_runner_endpoint: http://localhost:12434
+vllm_model: NousResearch/Meta-Llama-3-8B-Instruct
+vllm_endpoint: http://localhost:8000
 gateway_port: 7878
 setup_complete: false
 # API keys are stored securely in macOS Keychain.

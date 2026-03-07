@@ -31,6 +31,7 @@ final class SetupManager {
     var apiKey: String = ""
     var localModel: String = "phi4-mini"
     var localEndpoint: String = "http://127.0.0.1:11434"
+    var customEndpoint: String = ""
 
     // Ollama model list (populated on validation)
     var ollamaModels: [String] = []
@@ -80,6 +81,22 @@ final class SetupManager {
                 try await validateAnthropic()
             case .apple:
                 try validateApple()
+            case .openrouter:
+                try await validateOpenAICompatible(
+                    modelsURL: URL(string: "https://openrouter.ai/api/v1/models")!,
+                    apiKey: apiKey)
+            case .groq:
+                try await validateOpenAICompatible(
+                    modelsURL: URL(string: "https://api.groq.com/openai/v1/models")!,
+                    apiKey: apiKey)
+            case .huggingface:
+                try await validateHuggingFace()
+            case .dockerModelRunner:
+                let endpoint = customEndpoint.isEmpty ? "http://localhost:12434" : customEndpoint
+                try await validateLocalEndpoint(endpoint: endpoint, modelsPath: "engines/v1/models")
+            case .vllm:
+                let endpoint = customEndpoint.isEmpty ? "http://localhost:8000" : customEndpoint
+                try await validateLocalEndpoint(endpoint: endpoint, modelsPath: "v1/models")
             }
             providerValidation = .success
             providerReady = true
@@ -154,6 +171,49 @@ final class SetupManager {
         #endif
     }
 
+    private func validateOpenAICompatible(modelsURL: URL, apiKey: String) async throws {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw SetupError.missingAPIKey }
+        var request = URLRequest(url: modelsURL)
+        request.addValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
+        let (_, response) = try await Self.validationSession.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 401 { throw SetupError.invalidAPIKey }
+            throw SetupError.networkError("HTTP \(code)")
+        }
+    }
+
+    private func validateHuggingFace() async throws {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw SetupError.missingAPIKey }
+        var request = URLRequest(url: URL(string: "https://router.huggingface.co/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
+        let body: [String: Any] = [
+            "model": "meta-llama/Llama-3-70b",
+            "messages": [["role": "user", "content": "hi"]],
+            "max_tokens": 1,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, response) = try await Self.validationSession.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw SetupError.networkError("No response")
+        }
+        if http.statusCode == 401 { throw SetupError.invalidAPIKey }
+        if http.statusCode >= 500 { throw SetupError.networkError("HTTP \(http.statusCode)") }
+    }
+
+    private func validateLocalEndpoint(endpoint: String, modelsPath: String) async throws {
+        guard let base = URL(string: endpoint) else { throw SetupError.networkError("Invalid URL") }
+        let url = base.appendingPathComponent(modelsPath)
+        let (_, response) = try await Self.validationSession.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw SetupError.networkError("Server not reachable")
+        }
+    }
+
     // MARK: - Memory Migration
 
     func migrateMemories(store: PikoStore?) async {
@@ -211,16 +271,34 @@ final class SetupManager {
     func finalize(configStore: PikoConfigStore) throws {
         // Apply provider settings.
         configStore.provider = selectedProvider
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         switch selectedProvider {
         case .local:
             configStore.localModel = localModel
             configStore.localEndpoint = localEndpoint
         case .openai:
-            configStore.openAIAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            configStore.openAIAPIKey = trimmedKey
         case .anthropic:
-            configStore.anthropicAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            configStore.anthropicAPIKey = trimmedKey
         case .apple:
             break
+        case .openrouter:
+            configStore.openRouterAPIKey = trimmedKey
+        case .groq:
+            configStore.groqAPIKey = trimmedKey
+        case .huggingface:
+            configStore.huggingFaceAPIKey = trimmedKey
+        case .dockerModelRunner:
+            if !customEndpoint.isEmpty {
+                configStore.dockerModelRunnerEndpoint = customEndpoint
+            }
+        case .vllm:
+            if !customEndpoint.isEmpty {
+                configStore.vllmEndpoint = customEndpoint
+            }
+            if !trimmedKey.isEmpty {
+                configStore.vllmAPIKey = trimmedKey
+            }
         }
         try configStore.markSetupComplete()
     }

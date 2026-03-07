@@ -44,12 +44,19 @@ private struct OllamaChatMessage: Codable {
 
 private struct OpenAIResponse: Codable {
     let choices: [Choice]
+    let usage: OpenAIUsage?
     struct Choice: Codable {
         let message: Message
     }
     struct Message: Codable {
         let content: String
     }
+}
+
+private struct OpenAIUsage: Codable {
+    let prompt_tokens: Int?
+    let completion_tokens: Int?
+    let total_tokens: Int?
 }
 
 private struct OpenAIStreamChunk: Codable {
@@ -190,6 +197,9 @@ final class PikoBrain {
                     throw PikoBrainError.appleIntelligenceUnavailable
                 }
                 response = text
+            case .openrouter, .groq, .huggingface, .dockerModelRunner, .vllm:
+                let (baseURL, apiKey, model) = try openAICompatibleConfig()
+                response = try await openAICompatibleGenerate(baseURL: baseURL, apiKey: apiKey, model: model, prompt: clean, mood: mood)
             }
         } catch {
             gateway.logError(
@@ -286,6 +296,13 @@ final class PikoBrain {
                             continuation.yield(s)
                             try await Task.sleep(for: .milliseconds(15))
                         }
+                    case .openrouter, .groq, .huggingface, .dockerModelRunner, .vllm:
+                        let (baseURL, apiKey, model) = try self.openAICompatibleConfig()
+                        for try await chunk in self.openAICompatibleStreamGenerate(baseURL: baseURL, apiKey: apiKey, model: model, prompt: clean, mood: mood) {
+                            try Task.checkCancellation()
+                            fullResponse += chunk
+                            continuation.yield(chunk)
+                        }
                     }
 
                     if !fullResponse.isEmpty {
@@ -348,10 +365,15 @@ final class PikoBrain {
 
     private var activeModelName: String {
         switch config.provider {
-        case .local:     config.localModel
-        case .openai:    config.openAIModel
-        case .anthropic: config.anthropicModel
-        case .apple:     "apple-intelligence"
+        case .local:              config.localModel
+        case .openai:             config.openAIModel
+        case .anthropic:          config.anthropicModel
+        case .apple:              "apple-intelligence"
+        case .openrouter:         config.openRouterModel
+        case .groq:               config.groqModel
+        case .huggingface:        config.huggingFaceModel
+        case .dockerModelRunner:  config.dockerModelRunnerModel
+        case .vllm:               config.vllmModel
         }
     }
 
@@ -449,6 +471,9 @@ final class PikoBrain {
                 #else
                 throw PikoBrainError.appleIntelligenceUnavailable
                 #endif
+            case .openrouter, .groq, .huggingface, .dockerModelRunner, .vllm:
+                let (baseURL, apiKey, model) = try openAICompatibleConfig()
+                result = try await rawOpenAICompatibleGenerate(baseURL: baseURL, apiKey: apiKey, model: model, messages: messages)
             }
         } catch {
             gateway.logError(message: error.localizedDescription, subsystem: .memory, detail: "internal_call")
@@ -551,6 +576,21 @@ final class PikoBrain {
         case .anthropic:
             guard let key = config.anthropicAPIKey, !key.isEmpty else { return nil }
             return try await anthropicGenerate(prompt: prompt, apiKey: key, model: config.anthropicModel, mood: mood)
+        case .openrouter:
+            guard let key = config.openRouterAPIKey, !key.isEmpty else { return nil }
+            return try await openAICompatibleGenerate(
+                baseURL: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
+                apiKey: key, model: config.openRouterModel, prompt: prompt, mood: mood)
+        case .groq:
+            guard let key = config.groqAPIKey, !key.isEmpty else { return nil }
+            return try await openAICompatibleGenerate(
+                baseURL: URL(string: "https://api.groq.com/openai/v1/chat/completions")!,
+                apiKey: key, model: config.groqModel, prompt: prompt, mood: mood)
+        case .huggingface:
+            guard let key = config.huggingFaceAPIKey, !key.isEmpty else { return nil }
+            return try await openAICompatibleGenerate(
+                baseURL: URL(string: "https://router.huggingface.co/v1/chat/completions")!,
+                apiKey: key, model: config.huggingFaceModel, prompt: prompt, mood: mood)
         }
     }
 
@@ -765,6 +805,128 @@ final class PikoBrain {
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
+    }
+
+    // MARK: - OpenAI-Compatible Shared Handler
+
+    /// Returns (baseURL, apiKey, model) for the current provider.
+    private func openAICompatibleConfig() throws -> (URL, String?, String) {
+        switch config.provider {
+        case .openrouter:
+            guard let key = config.openRouterAPIKey, !key.isEmpty else {
+                throw PikoBrainError.missingCloudCredentials("No OpenRouter API key configured")
+            }
+            return (URL(string: "https://openrouter.ai/api/v1/chat/completions")!, key, config.openRouterModel)
+        case .groq:
+            guard let key = config.groqAPIKey, !key.isEmpty else {
+                throw PikoBrainError.missingCloudCredentials("No Groq API key configured")
+            }
+            return (URL(string: "https://api.groq.com/openai/v1/chat/completions")!, key, config.groqModel)
+        case .huggingface:
+            guard let key = config.huggingFaceAPIKey, !key.isEmpty else {
+                throw PikoBrainError.missingCloudCredentials("No HuggingFace API key configured")
+            }
+            return (URL(string: "https://router.huggingface.co/v1/chat/completions")!, key, config.huggingFaceModel)
+        case .dockerModelRunner:
+            let base = config.dockerModelRunnerEndpoint.appendingPathComponent("engines/v1/chat/completions")
+            return (base, nil, config.dockerModelRunnerModel)
+        case .vllm:
+            let base = config.vllmEndpoint.appendingPathComponent("v1/chat/completions")
+            let key = config.vllmAPIKey?.isEmpty == false ? config.vllmAPIKey : nil
+            return (base, key, config.vllmModel)
+        default:
+            throw PikoBrainError.missingCloudCredentials("Provider is not OpenAI-compatible")
+        }
+    }
+
+    private func openAICompatibleRequest(baseURL: URL, apiKey: String?, model: String, prompt: String, stream: Bool, mood: NotchManager.Mood = .neutral) throws -> URLRequest {
+        var request = URLRequest(url: baseURL)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let apiKey {
+            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let body: [String: Any] = [
+            "model": model,
+            "messages": contextMessages(for: prompt, mood: mood),
+            "temperature": 0.7,
+            "stream": stream,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    private func openAICompatibleGenerate(baseURL: URL, apiKey: String?, model: String, prompt: String, mood: NotchManager.Mood = .neutral) async throws -> String {
+        let request = try openAICompatibleRequest(baseURL: baseURL, apiKey: apiKey, model: model, prompt: prompt, stream: false, mood: mood)
+        let (data, response) = try await Self.session.data(for: request)
+        try checkHTTPResponse(response, data: data)
+
+        let parsed = try JSONDecoder().decode(OpenAIResponse.self, from: data)
+        guard let text = parsed.choices.first?.message.content,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PikoBrainError.emptyResponse
+        }
+
+        // Record token usage if available.
+        if let usage = parsed.usage {
+            store?.recordUsage(
+                provider: config.provider.rawValue,
+                model: model,
+                promptTokens: usage.prompt_tokens ?? 0,
+                completionTokens: usage.completion_tokens ?? 0
+            )
+        }
+        return text
+    }
+
+    private func openAICompatibleStreamGenerate(baseURL: URL, apiKey: String?, model: String, prompt: String, mood: NotchManager.Mood = .neutral) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                let request = try self.openAICompatibleRequest(baseURL: baseURL, apiKey: apiKey, model: model, prompt: prompt, stream: true, mood: mood)
+
+                let (bytes, response) = try await Self.session.bytes(for: request)
+                try self.checkHTTPResponse(response)
+
+                for try await line in bytes.lines {
+                    try Task.checkCancellation()
+                    guard line.hasPrefix("data: ") else { continue }
+                    let payload = String(line.dropFirst(6))
+                    if payload == "[DONE]" { break }
+                    guard let data = payload.data(using: .utf8) else { continue }
+                    if let chunk = try? JSONDecoder().decode(OpenAIStreamChunk.self, from: data),
+                       let content = chunk.choices.first?.delta.content, !content.isEmpty {
+                        continuation.yield(content)
+                    }
+                }
+                continuation.finish()
+            }
+        }
+    }
+
+    /// Raw OpenAI-compatible call with explicit messages (for respondInternal).
+    private func rawOpenAICompatibleGenerate(baseURL: URL, apiKey: String?, model: String, messages: [[String: String]]) async throws -> String {
+        var request = URLRequest(url: baseURL)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let apiKey {
+            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        let body: [String: Any] = [
+            "model": model,
+            "messages": messages,
+            "temperature": 0.3,
+            "stream": false,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await Self.session.data(for: request)
+        try checkHTTPResponse(response, data: data)
+        let parsed = try JSONDecoder().decode(OpenAIResponse.self, from: data)
+        guard let text = parsed.choices.first?.message.content,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PikoBrainError.emptyResponse
+        }
+        return text
     }
 
     // MARK: - HTTP Helpers

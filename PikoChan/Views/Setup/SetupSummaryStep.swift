@@ -42,10 +42,15 @@ struct SetupSummaryStep: View {
 
     private var providerLabel: String {
         switch setup.selectedProvider {
-        case .local:     "Ollama (\(setup.localModel))"
-        case .openai:    "OpenAI"
-        case .anthropic: "Anthropic"
-        case .apple:     "Apple Intelligence"
+        case .local:              "Ollama (\(setup.localModel))"
+        case .openai:             "OpenAI"
+        case .anthropic:          "Anthropic"
+        case .apple:              "Apple Intelligence"
+        case .openrouter:         "OpenRouter"
+        case .groq:               "Groq"
+        case .huggingface:        "HuggingFace"
+        case .dockerModelRunner:  "Docker Model Runner"
+        case .vllm:               "vLLM"
         }
     }
 

@@ -56,6 +56,17 @@ final class PikoStore {
                 FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
             );
         """)
+
+        execute("""
+            CREATE TABLE IF NOT EXISTS usage_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL
+            );
+        """)
     }
 
     // MARK: - Chat History
@@ -221,6 +232,7 @@ final class PikoStore {
         execute("DELETE FROM memory_vectors;")
         execute("DELETE FROM chat_history;")
         execute("DELETE FROM memories;")
+        execute("DELETE FROM usage_stats;")
     }
 
     /// Deletes chat turns older than the given number of days. Returns count deleted.
@@ -322,6 +334,42 @@ final class PikoStore {
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
         return Int(sqlite3_column_int(stmt, 0))
+    }
+
+    // MARK: - Usage Stats
+
+    func recordUsage(provider: String, model: String, promptTokens: Int, completionTokens: Int) {
+        let sql = "INSERT INTO usage_stats (provider, model, prompt_tokens, completion_tokens, created_at) VALUES (?, ?, ?, ?, ?);"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (provider as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (model as NSString).utf8String, -1, nil)
+        sqlite3_bind_int(stmt, 3, Int32(promptTokens))
+        sqlite3_bind_int(stmt, 4, Int32(completionTokens))
+        sqlite3_bind_double(stmt, 5, Date.now.timeIntervalSince1970)
+        sqlite3_step(stmt)
+    }
+
+    func usageSummary() -> [(provider: String, model: String, promptTokens: Int, completionTokens: Int)] {
+        let sql = """
+            SELECT provider, model, SUM(prompt_tokens), SUM(completion_tokens)
+            FROM usage_stats GROUP BY provider, model ORDER BY SUM(prompt_tokens) + SUM(completion_tokens) DESC;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var results: [(provider: String, model: String, promptTokens: Int, completionTokens: Int)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let provider = String(cString: sqlite3_column_text(stmt, 0))
+            let model = String(cString: sqlite3_column_text(stmt, 1))
+            let prompt = Int(sqlite3_column_int(stmt, 2))
+            let completion = Int(sqlite3_column_int(stmt, 3))
+            results.append((provider: provider, model: model, promptTokens: prompt, completionTokens: completion))
+        }
+        return results
     }
 
     // MARK: - Helpers

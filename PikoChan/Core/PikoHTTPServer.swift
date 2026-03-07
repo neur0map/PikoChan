@@ -466,10 +466,15 @@ final class PikoHTTPServer {
 
     private var activeModelName: String {
         switch brain.config.provider {
-        case .local:     brain.config.localModel
-        case .openai:    brain.config.openAIModel
-        case .anthropic: brain.config.anthropicModel
-        case .apple:     "apple-intelligence"
+        case .local:              brain.config.localModel
+        case .openai:             brain.config.openAIModel
+        case .anthropic:          brain.config.anthropicModel
+        case .apple:              "apple-intelligence"
+        case .openrouter:         brain.config.openRouterModel
+        case .groq:               brain.config.groqModel
+        case .huggingface:        brain.config.huggingFaceModel
+        case .dockerModelRunner:  brain.config.dockerModelRunnerModel
+        case .vllm:               brain.config.vllmModel
         }
     }
 }
