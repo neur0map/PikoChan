@@ -80,6 +80,8 @@ final class NotchManager {
     private var audioPlayer: AVAudioPlayer?
     private var currentAudioTmpFile: URL?
 
+    let actionHandler = PikoActionHandler()
+
     init(brain: PikoBrain) {
         self.brain = brain
     }
@@ -114,12 +116,14 @@ final class NotchManager {
             lastResponseSuggestion = "Check permissions on ~/.pikochan/"
         }
         loadMoodImages()
+        PikoSkillLoader.shared.reload()
         setupPanel(on: screen)
         installMonitors()
         observeScreenChanges()
         observeSettingsWindow()
         observeGeometrySettings()
         observeRerunSetup()
+        observeConfigSave()
 
         // Launch setup wizard if not completed.
         if !brain.config.setupComplete {
@@ -236,9 +240,27 @@ final class NotchManager {
         isResponding || !lastResponseText.isEmpty || lastResponseError != nil || showsChatHistory
     }
 
+    private var actionBlockHeight: CGFloat {
+        let actions = actionHandler.actions
+        guard !actions.isEmpty else { return 0 }
+        var total: CGFloat = 0
+        for action in actions {
+            // Base: command line + status line + padding = ~44pt
+            var h: CGFloat = 44
+            // Add output block height for completed commands with output.
+            if case .completed(let r) = action.status, !r.stdout.isEmpty || !r.stderr.isEmpty {
+                h += 60 // output block with 4 lines max
+            }
+            total += h
+        }
+        total += CGFloat(max(0, actions.count - 1)) * 4 // spacing
+        return total
+    }
+
     private var responseBlockHeight: CGFloat {
-        guard showsResponseBubble else { return 0 }
-        return isResponseExpanded ? 230 : 86
+        guard showsResponseBubble || !actionHandler.actions.isEmpty else { return 0 }
+        let base: CGFloat = showsResponseBubble ? (isResponseExpanded ? 230 : 86) : 0
+        return base + actionBlockHeight
     }
 
     var activeContentHeight: CGFloat {
@@ -424,6 +446,39 @@ final class NotchManager {
                 self.lastResponseText = rawAccumulated
             }
 
+            // Parse action tags + execute actions.
+            if !self.lastResponseText.isEmpty {
+                self.actionHandler.reset()
+                let (cleanText, actions) = self.actionHandler.parseActions(from: self.lastResponseText)
+                self.lastResponseText = cleanText
+
+                if !actions.isEmpty {
+                    // Lower panel so macOS permission dialogs (TCC) are clickable.
+                    self.panel?.level = .floating
+                    let _ = await self.actionHandler.executeAutoApproved()
+                    self.panel?.level = .screenSaver
+
+                    // Re-query LLM for summary if any shell commands completed.
+                    if self.actionHandler.hasCompletedShellActions {
+                        self.isResponding = true
+                        self.isResponseExpanded = false
+                        let requeryMsg = self.actionHandler.formatResultsForRequery()
+                        if let summary = try? await self.brain.respond(
+                            to: requeryMsg,
+                            mood: self.currentMood,
+                            skipMemoryExtraction: true,
+                            skipHistory: true
+                        ) {
+                            let (parsedMood, summaryClean) = MoodParser.parse(from: summary)
+                            if let parsedMood { self.currentMood = parsedMood }
+                            self.lastResponseText = summaryClean
+                        }
+                        self.isResponding = false
+                        self.updateVisibleContentRect()
+                    }
+                }
+            }
+
             // Parse config commands + scheduled nudges from response.
             if !self.lastResponseText.isEmpty {
                 let parsed = PikoConfigCommand.parse(from: self.lastResponseText)
@@ -504,6 +559,32 @@ final class NotchManager {
             }
             self.isResponding = false
             self.currentResponseTask = nil
+        }
+    }
+
+    /// Execute a single user-confirmed action and re-query if it's a shell command.
+    func executeAndRequery(_ action: PikoAction) async {
+        // Lower panel so macOS permission dialogs (TCC) are clickable.
+        panel?.level = .floating
+        await actionHandler.execute(action)
+        panel?.level = .screenSaver
+
+        if case .shell = action.kind, actionHandler.hasCompletedShellActions {
+            isResponding = true
+            isResponseExpanded = false
+            let requeryMsg = actionHandler.formatResultsForRequery()
+            if let summary = try? await brain.respond(
+                to: requeryMsg,
+                mood: currentMood,
+                skipMemoryExtraction: true,
+                skipHistory: true
+            ) {
+                let (parsedMood, summaryClean) = MoodParser.parse(from: summary)
+                if let parsedMood { currentMood = parsedMood }
+                lastResponseText = summaryClean
+            }
+            isResponding = false
+            updateVisibleContentRect()
         }
     }
 
@@ -1084,6 +1165,16 @@ final class NotchManager {
         }
     }
 
+    private func observeConfigSave() {
+        NotificationCenter.default.addObserver(
+            forName: .pikoConfigDidSave,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.brain.reloadConfig()
+        }
+    }
+
     private func observeGeometrySettings() {
         NotificationCenter.default.addObserver(
             forName: PikoSettings.geometryDidChange,
@@ -1113,4 +1204,5 @@ final class NotchManager {
 
 extension Notification.Name {
     static let pikoRerunSetup = Notification.Name("pikoRerunSetup")
+    static let pikoConfigDidSave = Notification.Name("pikoConfigDidSave")
 }

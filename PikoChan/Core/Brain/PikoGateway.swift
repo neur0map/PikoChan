@@ -68,6 +68,10 @@ final class PikoGateway {
         case voiceServerStart = "voice_server_start"
         case voiceServerReady = "voice_server_ready"
         case voiceServerCrash = "voice_server_crash"
+        case actionExecute = "action_execute"
+        case actionResult = "action_result"
+        case actionBlocked = "action_blocked"
+        case skillsReload = "skills_reload"
     }
 
     enum Subsystem: String, Encodable {
@@ -80,6 +84,7 @@ final class PikoGateway {
         case http
         case heartbeat
         case voice
+        case skills
     }
 
     // MARK: - Log Events
@@ -360,6 +365,37 @@ final class PikoGateway {
         log(type: .voiceServerCrash, subsystem: .voice, data: [
             "reason": reason,
             "retry_count": String(retryCount),
+        ])
+    }
+
+    // MARK: - Skills Events
+
+    func logActionExecute(command: String, autoApproved: Bool) {
+        log(type: .actionExecute, subsystem: .skills, data: [
+            "command": truncate(command, max: 500),
+            "auto_approved": String(autoApproved),
+        ])
+    }
+
+    func logActionResult(command: String, exitCode: Int32, durationMs: Int, outputChars: Int) {
+        log(type: .actionResult, subsystem: .skills, data: [
+            "command": truncate(command, max: 500),
+            "exit_code": String(exitCode),
+            "duration_ms": String(durationMs),
+            "output_chars": String(outputChars),
+        ])
+    }
+
+    func logActionBlocked(command: String, reason: String) {
+        log(type: .actionBlocked, subsystem: .skills, data: [
+            "command": truncate(command, max: 500),
+            "reason": reason,
+        ])
+    }
+
+    func logSkillsReload(count: Int) {
+        log(type: .skillsReload, subsystem: .skills, data: [
+            "count": String(count),
         ])
     }
 

@@ -31,6 +31,7 @@ final class SettingsWindowController {
             ("Soul",       "brain.head.profile",               NSHostingView(rootView: SoulTab())),
             ("AI Model",   "cpu",                              NSHostingView(rootView: AIModelTab())),
             ("Voice",      "waveform.circle",                   NSHostingView(rootView: VoiceTab())),
+            ("Skills",     "hammer",                            NSHostingView(rootView: SkillsTab())),
             ("Awareness", "heart.text.square",                 NSHostingView(rootView: AwarenessTab())),
             ("Behavior",   "gearshape",                        NSHostingView(rootView: BehaviorTab())),
             ("Notch",      "rectangle.topthird.inset.filled",  NSHostingView(rootView: NotchTuneTab())),

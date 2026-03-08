@@ -51,6 +51,9 @@ struct PikoConfig {
     var nudgeMarathon: Bool
     var quietHoursStart: Int
     var quietHoursEnd: Int
+    var skillsTerminalEnabled: Bool
+    var skillsBrowserEnabled: Bool
+    var skillsAutoExecuteSafe: Bool
 
     static let `default` = PikoConfig(
         provider: .local,
@@ -81,7 +84,10 @@ struct PikoConfig {
         nudgeLateNight: true,
         nudgeMarathon: false,
         quietHoursStart: 23,
-        quietHoursEnd: 7
+        quietHoursEnd: 7,
+        skillsTerminalEnabled: true,
+        skillsBrowserEnabled: true,
+        skillsAutoExecuteSafe: true
     )
 }
 
@@ -130,6 +136,9 @@ enum PikoConfigLoader {
         let nudgeMarathon = (map["nudge_marathon"] ?? "false") == "true"
         let quietHoursStart = Int(map["quiet_hours_start"] ?? "23") ?? 23
         let quietHoursEnd = Int(map["quiet_hours_end"] ?? "7") ?? 7
+        let skillsTerminalEnabled = (map["skills_terminal_enabled"] ?? "true") == "true"
+        let skillsBrowserEnabled = (map["skills_browser_enabled"] ?? "true") == "true"
+        let skillsAutoExecuteSafe = (map["skills_auto_execute_safe"] ?? "true") == "true"
 
         return PikoConfig(
             provider: provider,
@@ -160,7 +169,10 @@ enum PikoConfigLoader {
             nudgeLateNight: nudgeLateNight,
             nudgeMarathon: nudgeMarathon,
             quietHoursStart: quietHoursStart,
-            quietHoursEnd: quietHoursEnd
+            quietHoursEnd: quietHoursEnd,
+            skillsTerminalEnabled: skillsTerminalEnabled,
+            skillsBrowserEnabled: skillsBrowserEnabled,
+            skillsAutoExecuteSafe: skillsAutoExecuteSafe
         )
     }
 

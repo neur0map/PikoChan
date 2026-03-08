@@ -76,8 +76,33 @@ final class PikoHTTPServer {
             Task { @MainActor in
                 guard let self else { connection.cancel(); return }
 
+                // Bail immediately on error — prevents infinite loop on dead connections.
+                if let error {
+                    print("[PikoHTTPServer] Connection error: \(error)")
+                    connection.cancel()
+                    return
+                }
+
                 var buffer = accumulated
                 if let content { buffer.append(content) }
+
+                // Connection closed with no new data and nothing buffered — done.
+                if content == nil && isComplete {
+                    if !buffer.isEmpty, let headerEnd = self.findHeaderEnd(in: buffer) {
+                        // Try to process whatever we have.
+                        let headerData = buffer[..<headerEnd]
+                        let bodyStart = buffer[headerEnd...]
+                        if let headerString = String(data: headerData, encoding: .utf8) {
+                            let request = self.parseRequest(headerString)
+                            let contentLength = request.headers["content-length"].flatMap(Int.init) ?? 0
+                            let body = contentLength > 0 ? Data(bodyStart.prefix(contentLength)) : nil
+                            await self.route(request: request, body: body, connection: connection)
+                            return
+                        }
+                    }
+                    connection.cancel()
+                    return
+                }
 
                 // Check if we have the full headers (double CRLF).
                 if let headerEnd = self.findHeaderEnd(in: buffer) {
@@ -96,6 +121,10 @@ final class PikoHTTPServer {
                     if bodyStart.count >= contentLength {
                         let body = contentLength > 0 ? Data(bodyStart.prefix(contentLength)) : nil
                         await self.route(request: request, body: body, connection: connection)
+                    } else if isComplete {
+                        // Connection closed before full body — process what we have.
+                        let body = bodyStart.isEmpty ? nil : Data(bodyStart)
+                        await self.route(request: request, body: body, connection: connection)
                     } else {
                         // Need more body data.
                         self.receiveHTTP(on: connection, accumulated: buffer)
@@ -103,8 +132,8 @@ final class PikoHTTPServer {
                 } else if buffer.count > 1_000_000 {
                     // Header too large.
                     self.sendResponse(connection: connection, status: 413, body: "{\"error\":\"Request too large\"}")
-                } else if isComplete || error != nil {
-                    // Connection closed before full request.
+                } else if isComplete {
+                    // Connection closed before full headers.
                     connection.cancel()
                 } else {
                     // Need more header data.

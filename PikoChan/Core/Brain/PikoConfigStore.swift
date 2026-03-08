@@ -36,6 +36,9 @@ final class PikoConfigStore {
     var nudgeMarathon: Bool = false
     var quietHoursStart: Int = 23
     var quietHoursEnd: Int = 7
+    var skillsTerminalEnabled: Bool = true
+    var skillsBrowserEnabled: Bool = true
+    var skillsAutoExecuteSafe: Bool = true
 
     private init() {
         do {
@@ -78,6 +81,9 @@ final class PikoConfigStore {
         nudgeMarathon = cfg.nudgeMarathon
         quietHoursStart = cfg.quietHoursStart
         quietHoursEnd = cfg.quietHoursEnd
+        skillsTerminalEnabled = cfg.skillsTerminalEnabled
+        skillsBrowserEnabled = cfg.skillsBrowserEnabled
+        skillsAutoExecuteSafe = cfg.skillsAutoExecuteSafe
     }
 
     func save() throws {
@@ -107,9 +113,15 @@ nudge_late_night: \(nudgeLateNight ? "true" : "false")
 nudge_marathon: \(nudgeMarathon ? "true" : "false")
 quiet_hours_start: \(quietHoursStart)
 quiet_hours_end: \(quietHoursEnd)
+skills_terminal_enabled: \(skillsTerminalEnabled ? "true" : "false")
+skills_browser_enabled: \(skillsBrowserEnabled ? "true" : "false")
+skills_auto_execute_safe: \(skillsAutoExecuteSafe ? "true" : "false")
 """
 
         try yaml.write(to: home.configFile, atomically: true, encoding: .utf8)
+
+        // Notify the brain to reload immediately.
+        NotificationCenter.default.post(name: .pikoConfigDidSave, object: nil)
 
         // Save API keys to Keychain.
         let keychainEntries: [(account: String, value: String)] = [
@@ -171,6 +183,9 @@ nudge_late_night: \(cfg.nudgeLateNight ? "true" : "false")
 nudge_marathon: \(cfg.nudgeMarathon ? "true" : "false")
 quiet_hours_start: \(cfg.quietHoursStart)
 quiet_hours_end: \(cfg.quietHoursEnd)
+skills_terminal_enabled: \(cfg.skillsTerminalEnabled ? "true" : "false")
+skills_browser_enabled: \(cfg.skillsBrowserEnabled ? "true" : "false")
+skills_auto_execute_safe: \(cfg.skillsAutoExecuteSafe ? "true" : "false")
 """
             try? yaml.write(to: home.configFile, atomically: true, encoding: .utf8)
         }

@@ -421,7 +421,9 @@ final class PikoBrain {
         // than burying it at the end of the system prompt for small models.
         messages.append(["role": "system", "content": soul.postHistoryReminder(mood: mood)])
 
-        messages.append(["role": "user", "content": prompt])
+        // Enrich prompt with file context (resolved paths, types, sizes).
+        let enrichedPrompt = PikoFileDetector.enrichPrompt(prompt)
+        messages.append(["role": "user", "content": enrichedPrompt])
         return messages
     }
 
@@ -647,7 +649,8 @@ final class PikoBrain {
                     composed += "User: \(turn.user)\nAssistant: \(turn.assistant)\n\n"
                 }
                 composed += "System: \(soul.postHistoryReminder(mood: mood))\n\n"
-                composed += "User: \(prompt)\nAssistant:"
+                let enrichedPrompt = PikoFileDetector.enrichPrompt(prompt)
+                composed += "User: \(enrichedPrompt)\nAssistant:"
 
                 let session = LanguageModelSession(model: model)
                 let response = try await session.respond(to: composed)

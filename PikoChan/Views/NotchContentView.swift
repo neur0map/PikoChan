@@ -54,10 +54,27 @@ struct NotchContentView: View {
     }
 
     private var showsResponseBubble: Bool { manager.showsResponseBubble }
+    private var hasActions: Bool { !manager.actionHandler.actions.isEmpty }
+
+    private var actionBlockHeight: CGFloat {
+        let actions = manager.actionHandler.actions
+        guard !actions.isEmpty else { return 0 }
+        var total: CGFloat = 0
+        for action in actions {
+            var h: CGFloat = 44
+            if case .completed(let r) = action.status, !r.stdout.isEmpty || !r.stderr.isEmpty {
+                h += 60
+            }
+            total += h
+        }
+        total += CGFloat(max(0, actions.count - 1)) * 4
+        return total
+    }
 
     private var responseBlockHeight: CGFloat {
-        guard showsResponseBubble else { return 0 }
-        return manager.isResponseExpanded ? 230 : 86
+        guard showsResponseBubble || hasActions else { return 0 }
+        let base: CGFloat = showsResponseBubble ? (manager.isResponseExpanded ? 230 : 86) : 0
+        return base + actionBlockHeight
     }
 
     private var expandedNaturalHeight: CGFloat {
@@ -164,8 +181,10 @@ struct NotchContentView: View {
                         responseBubble
                             .padding(.top, 8)
                             .padding(.horizontal, 16)
-                            .padding(.bottom, 6)
+                            .padding(.bottom, hasActions ? 2 : 6)
                     }
+
+                    actionCards
                 }
                 .padding(.top, manager.notchSize.height + settings.contentPadding + activeVerticalOffset(for: manager.state))
             }
@@ -262,6 +281,7 @@ struct NotchContentView: View {
                         .foregroundStyle(.white.opacity(0.3))
                 }
             }
+
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // Fixed height prevents content-driven relayout loops.
@@ -313,6 +333,26 @@ struct NotchContentView: View {
                 manager.isResponseExpanded.toggle()
                 manager.updateVisibleContentRect()
             }
+        }
+    }
+
+    // MARK: - Action Cards
+
+    @ViewBuilder
+    private var actionCards: some View {
+        if !manager.actionHandler.actions.isEmpty {
+            VStack(spacing: 4) {
+                ForEach(manager.actionHandler.actions) { action in
+                    ActionCardView(action: action, onRun: {
+                        Task {
+                            await manager.executeAndRequery(action)
+                        }
+                    }, onCancel: {
+                        manager.actionHandler.cancel(action)
+                    })
+                }
+            }
+            .padding(.horizontal, 16)
         }
     }
 }

@@ -11,6 +11,10 @@ struct AIModelTab: View {
     @State private var validationError = ""
     @State private var isTesting = false
 
+    // Model fetching for providers with /v1/models endpoints.
+    @State private var fetchedModels: [String] = []
+    @State private var isFetchingModels = false
+
     var body: some View {
         Form {
             Section {
@@ -114,7 +118,7 @@ struct AIModelTab: View {
             .pickerStyle(.menu)
 
             if config.cloudFallback == .openai {
-                TextField("OpenAI model:", text: $config.openAIModel)
+                modelPickerRow(model: $config.openAIModel, provider: .openai)
                 SecureField("OpenAI API key:", text: $config.openAIAPIKey)
             }
             if config.cloudFallback == .anthropic {
@@ -122,11 +126,11 @@ struct AIModelTab: View {
                 SecureField("Anthropic API key:", text: $config.anthropicAPIKey)
             }
             if config.cloudFallback == .openrouter {
-                TextField("OpenRouter model:", text: $config.openRouterModel)
+                modelPickerRow(model: $config.openRouterModel, provider: .openrouter)
                 SecureField("OpenRouter API key:", text: $config.openRouterAPIKey)
             }
             if config.cloudFallback == .groq {
-                TextField("Groq model:", text: $config.groqModel)
+                modelPickerRow(model: $config.groqModel, provider: .groq)
                 SecureField("Groq API key:", text: $config.groqAPIKey)
             }
             if config.cloudFallback == .huggingface {
@@ -143,7 +147,7 @@ struct AIModelTab: View {
 
     private var openAISection: some View {
         Section {
-            TextField("Model:", text: $config.openAIModel)
+            modelPickerRow(model: $config.openAIModel, provider: .openai)
             SecureField("API key:", text: $config.openAIAPIKey)
         } header: {
             Text("OpenAI")
@@ -183,7 +187,7 @@ struct AIModelTab: View {
 
     private var openRouterSection: some View {
         Section {
-            TextField("Model:", text: $config.openRouterModel)
+            modelPickerRow(model: $config.openRouterModel, provider: .openrouter)
             SecureField("API key:", text: $config.openRouterAPIKey)
         } header: {
             Text("OpenRouter")
@@ -195,7 +199,7 @@ struct AIModelTab: View {
 
     private var groqSection: some View {
         Section {
-            TextField("Model:", text: $config.groqModel)
+            modelPickerRow(model: $config.groqModel, provider: .groq)
             SecureField("API key:", text: $config.groqAPIKey)
         } header: {
             Text("Groq")
@@ -490,6 +494,112 @@ struct AIModelTab: View {
             let (_, response) = try await session.data(from: url)
             return (response as? HTTPURLResponse)?.statusCode == 200
         }
+    }
+
+    // MARK: - Model Picker
+
+    /// A row that shows a Picker when models are fetched, or a TextField + Fetch button otherwise.
+    private func modelPickerRow(model: Binding<String>, provider: PikoConfig.Provider) -> some View {
+        HStack(spacing: 6) {
+            if fetchedModels.isEmpty {
+                TextField("Model:", text: model)
+            } else {
+                Picker("Model:", selection: model) {
+                    // Always include current value so the picker doesn't blank out.
+                    if !fetchedModels.contains(model.wrappedValue) {
+                        Text(model.wrappedValue).tag(model.wrappedValue)
+                    }
+                    ForEach(fetchedModels, id: \.self) { m in
+                        Text(m).tag(m)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+
+            Button {
+                fetchModels(for: provider)
+            } label: {
+                if isFetchingModels {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.down.circle")
+                }
+            }
+            .buttonStyle(.borderless)
+            .disabled(isFetchingModels)
+            .help("Fetch available models")
+        }
+    }
+
+    private func fetchModels(for provider: PikoConfig.Provider) {
+        isFetchingModels = true
+        fetchedModels = []
+
+        Task {
+            defer { isFetchingModels = false }
+
+            do {
+                let models = try await fetchModelList(for: provider)
+                fetchedModels = models
+                if models.isEmpty {
+                    showStatus("No models found", color: .orange)
+                }
+            } catch {
+                showStatus("Fetch failed: \(error.localizedDescription)", color: .red)
+            }
+        }
+    }
+
+    private func fetchModelList(for provider: PikoConfig.Provider) async throws -> [String] {
+        let sessionCfg = URLSessionConfiguration.default
+        sessionCfg.timeoutIntervalForRequest = 10
+        let session = URLSession(configuration: sessionCfg)
+
+        let (url, apiKey): (URL, String) = switch provider {
+        case .openai:
+            (URL(string: "https://api.openai.com/v1/models")!,
+             config.openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
+        case .groq:
+            (URL(string: "https://api.groq.com/openai/v1/models")!,
+             config.groqAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
+        case .openrouter:
+            (URL(string: "https://openrouter.ai/api/v1/models")!,
+             config.openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            throw URLError(.badURL)
+        }
+
+        guard !apiKey.isEmpty else {
+            showStatus("Enter API key first", color: .orange)
+            return []
+        }
+
+        var request = URLRequest(url: url)
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dataArray = json["data"] as? [[String: Any]]
+        else { return [] }
+
+        var ids = dataArray.compactMap { $0["id"] as? String }
+
+        // Filter to chat-capable models for OpenAI (skip embeddings, tts, dall-e, whisper, etc.)
+        if provider == .openai {
+            let chatPrefixes = ["gpt-", "o1", "o3", "o4", "chatgpt-"]
+            ids = ids.filter { id in
+                let lower = id.lowercased()
+                return chatPrefixes.contains { lower.hasPrefix($0) }
+            }
+        }
+
+        ids.sort()
+        return ids
     }
 
     private func showStatus(_ text: String, color: Color) {

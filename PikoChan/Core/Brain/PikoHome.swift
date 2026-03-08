@@ -83,6 +83,9 @@ nudge_late_night: true
 nudge_marathon: false
 quiet_hours_start: 23
 quiet_hours_end: 7
+skills_terminal_enabled: true
+skills_browser_enabled: true
+skills_auto_execute_safe: true
 # API keys are stored securely in macOS Keychain.
 # Configure them in Settings → AI Model.
 """
@@ -130,34 +133,40 @@ local_language: en
     static let defaultTerminalSkill = """
 ---
 name: Terminal Helper
-trigger: terminal, shell, command
+description: Run terminal commands on the user's Mac
 permissions:
   - terminal
 ---
 
-Suggest terminal commands. User executes manually.
+You can execute shell commands when the user asks you to interact with their \
+Mac's terminal. Use [shell:COMMAND] to run a command. Safe commands (ls, cat, \
+git status, etc.) run automatically. Others require user confirmation. \
+Never use sudo or destructive commands.
 """
 
     static let defaultBrowserSkill = """
 ---
 name: Browser Helper
-trigger: browser, web, open url
+description: Open URLs and search the web
 permissions:
   - browser
 ---
 
-Help with browser navigation tasks.
+You can open URLs and perform web searches. Use [open:URL] to open a URL in \
+the default browser. You can also open Google searches for the user. \
+Only http/https URLs are allowed.
 """
 
     static let defaultWeatherSkill = """
 ---
 name: Weather Check
-trigger: weather, forecast
+description: Check weather via web search
 permissions:
   - browser
 ---
 
-Check current weather and summarize it.
+When the user asks about weather, use [open:https://www.google.com/search?q=weather] \
+to open a weather search, or suggest a more specific search.
 """
 
     // swiftlint:disable line_length
