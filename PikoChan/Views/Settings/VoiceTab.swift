@@ -9,6 +9,14 @@ struct VoiceTab: View {
     @State private var falSchema: FalAISchema.ModelSchema?
     @State private var falSchemaLoading = false
 
+    // Local TTS state.
+    @State private var localModels: [PikoVoiceServer.InstalledModel] = []
+    @State private var hasPython = false
+    @State private var hasHuggingfaceCLI = false
+    @State private var hasPythonDeps = false
+    @State private var hasSox = false
+    @State private var localDependenciesChecked = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -22,6 +30,10 @@ struct VoiceTab: View {
         .onAppear {
             if config.ttsProvider == .falai && !config.ttsModel.isEmpty {
                 fetchFalSchema()
+            }
+            if config.ttsProvider == .local {
+                checkLocalDependencies()
+                scanInstalledModels()
             }
         }
         .onDisappear {
@@ -44,45 +56,315 @@ struct VoiceTab: View {
             }
             .pickerStyle(.menu)
 
-            if config.ttsProvider != .none {
-                // Auto-speak toggle — prominent, right after provider.
-                Toggle("Speak responses aloud", isOn: $config.autoSpeak)
-                    .onChange(of: config.autoSpeak) { _, _ in
-                        try? config.save()
-                    }
+            if config.ttsProvider == .local {
+                localTTSSection
+            } else if config.ttsProvider != .none {
+                cloudTTSSection
+            }
+        }
+    }
 
-                // For fal.ai: model first (determines voices), then voice.
-                ttsModelPicker
-                ttsVoicePicker
+    // MARK: - Cloud TTS Section
 
-                if falSchema?.hasSpeed != false || config.ttsProvider != .falai {
-                    LabeledContent("Speed") {
-                        HStack {
-                            Slider(value: $config.ttsSpeed, in: 0.5...2.0, step: 0.1)
-                                .frame(width: 140)
-                            Text(String(format: "%.1fx", config.ttsSpeed))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                                .frame(width: 36, alignment: .trailing)
-                        }
-                    }
+    private var cloudTTSSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Auto-speak toggle — prominent, right after provider.
+            Toggle("Speak responses aloud", isOn: $config.autoSpeak)
+                .onChange(of: config.autoSpeak) { _, _ in
+                    try? config.save()
                 }
 
-                ttsKeySection
+            // For fal.ai: model first (determines voices), then voice.
+            ttsModelPicker
+            ttsVoicePicker
 
-                HStack(spacing: 12) {
-                    Button("Test TTS") {
-                        testTTS()
-                    }
-                    .disabled(!hasTTSKey)
-
-                    if let status = testStatus {
-                        Text(status)
-                            .font(.caption)
-                            .foregroundStyle(status.contains("Error") ? .red : .green)
+            if falSchema?.hasSpeed != false || config.ttsProvider != .falai {
+                LabeledContent("Speed") {
+                    HStack {
+                        Slider(value: $config.ttsSpeed, in: 0.5...2.0, step: 0.1)
+                            .frame(width: 140)
+                        Text(String(format: "%.1fx", config.ttsSpeed))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 36, alignment: .trailing)
                     }
                 }
             }
+
+            ttsKeySection
+
+            HStack(spacing: 12) {
+                Button("Test TTS") {
+                    testTTS()
+                }
+                .disabled(!hasTTSKey)
+
+                if let status = testStatus {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(status.contains("Error") ? .red : .green)
+                }
+            }
+        }
+    }
+
+    // MARK: - Local TTS Section
+
+    private var localTTSSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Dependency warnings.
+            if localDependenciesChecked {
+                if !hasPython {
+                    warningBanner(
+                        icon: "xmark.octagon.fill",
+                        color: .red,
+                        title: "python3 not found",
+                        message: "Install Python 3 to use local TTS.",
+                        command: "brew install python3"
+                    )
+                }
+
+                if hasPython && !hasHuggingfaceCLI {
+                    warningBanner(
+                        icon: "exclamationmark.triangle.fill",
+                        color: .orange,
+                        title: "Hugging Face CLI not found",
+                        message: "Needed to download models. Install via pipx (recommended).",
+                        command: "brew install pipx && pipx install huggingface_hub"
+                    )
+                }
+
+                if hasPython && !hasPythonDeps {
+                    warningBanner(
+                        icon: "exclamationmark.triangle.fill",
+                        color: .orange,
+                        title: "Missing Python packages",
+                        message: "Run this to create a venv and install dependencies:",
+                        command: "python3 -m venv ~/.pikochan/voice/venv && ~/.pikochan/voice/venv/bin/pip install qwen-tts fastapi uvicorn soundfile"
+                    )
+                }
+
+                if hasPython && !hasSox {
+                    warningBanner(
+                        icon: "exclamationmark.triangle.fill",
+                        color: .orange,
+                        title: "SoX not found",
+                        message: "Required for audio processing by Qwen3-TTS.",
+                        command: "brew install sox"
+                    )
+                }
+
+                if localModels.isEmpty {
+                    warningBanner(
+                        icon: "exclamationmark.triangle.fill",
+                        color: .orange,
+                        title: "No models downloaded",
+                        message: "Download a model to get started.",
+                        command: "hf download Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice --local-dir ~/.pikochan/voice/models/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+                    )
+                }
+            }
+
+            // Server status + controls.
+            let server = PikoVoiceServer.shared
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(serverStatusColor(server.status))
+                    .frame(width: 8, height: 8)
+                Text(server.status.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                switch server.status {
+                case .stopped, .errored:
+                    Button("Start") {
+                        server.start(modelPath: config.localModelPath)
+                    }
+                    .disabled(config.localModelPath.isEmpty)
+                case .starting:
+                    ProgressView()
+                        .controlSize(.small)
+                case .running:
+                    Button("Stop") { server.stop() }
+                    Button("Restart") {
+                        server.restart(modelPath: config.localModelPath)
+                    }
+                }
+            }
+
+            // Installed models list.
+            if !localModels.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Models")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    ForEach(localModels) { model in
+                        HStack {
+                            Image(systemName: config.localModelPath == model.path
+                                  ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(config.localModelPath == model.path ? .blue : .secondary)
+                                .font(.caption)
+                            Text(model.name)
+                                .font(.caption)
+                            Spacer()
+                            Text(model.sizeLabel)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            config.localModelPath = model.path
+                            try? config.save()
+                        }
+                    }
+                }
+            }
+
+            Button("Scan for Models") {
+                scanInstalledModels()
+            }
+            .font(.caption)
+
+            // Auto-speak toggle.
+            Toggle("Speak responses aloud", isOn: $config.autoSpeak)
+                .onChange(of: config.autoSpeak) { _, _ in
+                    try? config.save()
+                }
+
+            // Voice picker — from server when running, text field when stopped.
+            if server.status == .running && !server.availableVoices.isEmpty {
+                Picker("Voice", selection: $config.ttsVoiceId) {
+                    ForEach(server.availableVoices, id: \.self) { voice in
+                        Text(voice).tag(voice)
+                    }
+                }
+                .pickerStyle(.menu)
+                .onAppear {
+                    // Fix stale voice selection that doesn't match available voices.
+                    if !server.availableVoices.contains(config.ttsVoiceId) {
+                        config.ttsVoiceId = server.availableVoices[0]
+                        try? config.save()
+                    }
+                }
+                .onChange(of: server.availableVoices) { _, voices in
+                    if !voices.isEmpty && !voices.contains(config.ttsVoiceId) {
+                        config.ttsVoiceId = voices[0]
+                        try? config.save()
+                    }
+                }
+            } else {
+                LabeledContent("Voice") {
+                    TextField("e.g. Chelsie", text: $config.ttsVoiceId)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 150)
+                }
+            }
+
+            // Language picker.
+            Picker("Language", selection: $config.localLanguage) {
+                ForEach(Self.languages, id: \.code) { lang in
+                    Text(lang.label).tag(lang.code)
+                }
+            }
+            .pickerStyle(.menu)
+
+            // Speed slider.
+            LabeledContent("Speed") {
+                HStack {
+                    Slider(value: $config.ttsSpeed, in: 0.5...2.0, step: 0.1)
+                        .frame(width: 140)
+                    Text(String(format: "%.1fx", config.ttsSpeed))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, alignment: .trailing)
+                }
+            }
+
+            // Mood mapping.
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Emotion Tags")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Picker("Mode", selection: $config.localMoodMode) {
+                    Text("Auto").tag("auto")
+                    Text("Custom").tag("custom")
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+
+                if config.localMoodMode == "custom" {
+                    LabeledContent("Custom Prompt") {
+                        TextField("Extra emotion instructions", text: Binding(
+                            get: { config.ttsModel },
+                            set: { config.ttsModel = $0 }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 200)
+                    }
+                    .font(.caption)
+                }
+            }
+
+            // Test button.
+            HStack(spacing: 12) {
+                Button("Test TTS") {
+                    testTTS()
+                }
+                .disabled(server.status != .running)
+
+                if let status = testStatus {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(status.contains("Error") ? .red : .green)
+                }
+            }
+        }
+    }
+
+    // MARK: - Warning Banner
+
+    private func warningBanner(icon: String, color: Color, title: String, message: String, command: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .foregroundStyle(color)
+                    .font(.caption)
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            Text(message)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 4) {
+                Text(command)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption2)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy to clipboard")
+            }
+        }
+        .padding(8)
+        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func serverStatusColor(_ status: PikoVoiceServer.Status) -> Color {
+        switch status {
+        case .stopped:  .gray
+        case .starting: .yellow
+        case .running:  .green
+        case .errored:  .red
         }
     }
 
@@ -342,7 +624,7 @@ struct VoiceTab: View {
     }
 
     private var hasTTSKey: Bool {
-        PikoVoiceConfigStore.shared.currentConfig.ttsAPIKey != nil
+        config.ttsProvider == .local || PikoVoiceConfigStore.shared.currentConfig.ttsAPIKey != nil
     }
 
     // MARK: - Provider Defaults
@@ -365,6 +647,11 @@ struct VoiceTab: View {
             config.ttsModel = "fal-ai/qwen-3-tts/text-to-speech/1.7b"
             config.ttsVoiceId = "Vivian"
             fetchFalSchema()
+        case .local:
+            config.ttsVoiceId = "Vivian"
+            config.ttsModel = ""
+            checkLocalDependencies()
+            scanInstalledModels()
         case .none:
             break
         }
@@ -389,6 +676,7 @@ struct VoiceTab: View {
         case .fishaudio:  "Fish Audio"
         case .cartesia:   "Cartesia"
         case .falai:      "fal.ai"
+        case .local:      "Local (Qwen3-TTS)"
         }
     }
 
@@ -413,9 +701,30 @@ struct VoiceTab: View {
                 let tts = PikoTTS()
                 let audioData = try await tts.synthesize(text: "Hello! I'm PikoChan.", config: voiceConfig)
 
-                let player = try AVAudioPlayer(data: audioData)
+                // Write to temp file with correct extension — AVAudioPlayer
+                // is more reliable from file (especially for WAV on macOS).
+                let header = [UInt8](audioData.prefix(4))
+                let ext: String
+                if header[0] == 0x52, header[1] == 0x49, header[2] == 0x46, header[3] == 0x46 {
+                    ext = "wav"
+                } else {
+                    ext = "mp3"
+                }
+                let tmpFile = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString + ".\(ext)")
+                try audioData.write(to: tmpFile)
+
+                let player = try AVAudioPlayer(contentsOf: tmpFile)
+                player.prepareToPlay()
                 player.play()
                 testStatus = "Playing (\(audioData.count / 1024) KB)"
+                // Clean up after playback finishes.
+                Task {
+                    while player.isPlaying {
+                        try? await Task.sleep(for: .milliseconds(100))
+                    }
+                    try? FileManager.default.removeItem(at: tmpFile)
+                }
             } catch {
                 testStatus = "Error: \(error.localizedDescription)"
             }
@@ -441,6 +750,38 @@ struct VoiceTab: View {
                     if config.ttsVoiceId.isEmpty || !schema.voices.contains(config.ttsVoiceId) {
                         config.ttsVoiceId = schema.defaultVoice ?? schema.voices[0]
                     }
+                }
+            }
+        }
+    }
+
+    // MARK: - Local TTS Helpers
+
+    private func checkLocalDependencies() {
+        Task.detached {
+            let python = PikoVoiceServer.pythonAvailable()
+            let hfcli = PikoVoiceServer.huggingfaceCLIAvailable()
+            let pyDeps = python ? PikoVoiceServer.pythonDepsAvailable() : false
+            let sox = PikoVoiceServer.soxAvailable()
+            await MainActor.run {
+                self.hasPython = python
+                self.hasHuggingfaceCLI = hfcli
+                self.hasPythonDeps = pyDeps
+                self.hasSox = sox
+                self.localDependenciesChecked = true
+            }
+        }
+    }
+
+    private func scanInstalledModels() {
+        Task.detached {
+            let models = PikoVoiceServer.installedModels()
+            await MainActor.run {
+                self.localModels = models
+                // Auto-select first model if none selected.
+                if self.config.localModelPath.isEmpty, let first = models.first {
+                    self.config.localModelPath = first.path
+                    try? self.config.save()
                 }
             }
         }

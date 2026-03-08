@@ -55,9 +55,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         heartbeat = hb
         manager.heartbeat = hb
         server.heartbeat = hb
+
+        // Auto-start local TTS server if configured.
+        let voiceConfig = PikoVoiceConfigStore.shared.currentConfig
+        if voiceConfig.ttsProvider == .local && !voiceConfig.localModelPath.isEmpty {
+            PikoVoiceServer.shared.start(modelPath: voiceConfig.localModelPath)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        PikoVoiceServer.shared.stop()
         heartbeat?.stop()
         httpServer?.stop()
         notchManager?.teardown()

@@ -6,9 +6,15 @@ final class PikoTTS {
     /// Optional mood string sent as emotion/style prompt for models that support it.
     var moodHint: String?
 
+    /// Current PikoChan mood — used for local TTS emotion tag mapping.
+    var currentMood: NotchManager.Mood?
+
     func synthesize(text: String, config: PikoVoiceConfig) async throws -> Data {
-        guard let apiKey = config.ttsAPIKey, !apiKey.isEmpty else {
-            throw PikoVoiceError.noAPIKey(provider: config.ttsProvider.rawValue)
+        // Local provider doesn't need an API key.
+        if config.ttsProvider != .local {
+            guard let apiKey = config.ttsAPIKey, !apiKey.isEmpty else {
+                throw PikoVoiceError.noAPIKey(provider: config.ttsProvider.rawValue)
+            }
         }
 
         let startTime = CFAbsoluteTimeGetCurrent()
@@ -17,15 +23,17 @@ final class PikoTTS {
         let audioData: Data
         switch config.ttsProvider {
         case .openai:
-            audioData = try await synthesizeOpenAI(text: text, config: config, apiKey: apiKey)
+            audioData = try await synthesizeOpenAI(text: text, config: config, apiKey: config.ttsAPIKey!)
         case .elevenlabs:
-            audioData = try await synthesizeElevenLabs(text: text, config: config, apiKey: apiKey)
+            audioData = try await synthesizeElevenLabs(text: text, config: config, apiKey: config.ttsAPIKey!)
         case .fishaudio:
-            audioData = try await synthesizeFishAudio(text: text, config: config, apiKey: apiKey)
+            audioData = try await synthesizeFishAudio(text: text, config: config, apiKey: config.ttsAPIKey!)
         case .cartesia:
-            audioData = try await synthesizeCartesia(text: text, config: config, apiKey: apiKey)
+            audioData = try await synthesizeCartesia(text: text, config: config, apiKey: config.ttsAPIKey!)
         case .falai:
-            audioData = try await synthesizeFalAI(text: text, config: config, apiKey: apiKey)
+            audioData = try await synthesizeFalAI(text: text, config: config, apiKey: config.ttsAPIKey!)
+        case .local:
+            audioData = try await synthesizeLocal(text: text, config: config)
         case .none:
             throw PikoVoiceError.ttsFailed(detail: "No TTS provider configured")
         }
@@ -197,6 +205,59 @@ final class PikoTTS {
         let (audioData, audioResponse) = try await URLSession.shared.data(from: audioURL)
         try validateHTTPResponse(audioResponse, data: audioData, provider: "fal.ai TTS audio fetch")
         return audioData
+    }
+
+    // MARK: - Local TTS (Qwen3-TTS via Python server)
+
+    private func synthesizeLocal(text: String, config: PikoVoiceConfig) async throws -> Data {
+        let server = PikoVoiceServer.shared
+        guard server.status == .running else {
+            throw PikoVoiceError.ttsFailed(detail: "Local TTS server is not running")
+        }
+
+        // Build emotion prompt based on mood mode.
+        let emotionPrompt: String
+        switch config.localMoodMode {
+        case "custom":
+            // Custom mode: auto tags + user's custom text from moodHint.
+            let autoTags = Self.qwenEmotionTags(for: currentMood ?? .neutral)
+            emotionPrompt = autoTags + (moodHint.map { " \($0)" } ?? "")
+        default: // "auto"
+            emotionPrompt = Self.qwenEmotionTags(for: currentMood ?? .neutral)
+        }
+
+        var body: [String: Any] = [
+            "text": text,
+            "voice": config.ttsVoiceId.isEmpty ? "Vivian" : config.ttsVoiceId,
+            "speed": config.ttsSpeed,
+            "language": config.localLanguage.isEmpty ? "en" : config.localLanguage,
+        ]
+        if !emotionPrompt.isEmpty {
+            body["prompt"] = emotionPrompt
+        }
+
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:7879/synthesize")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 60
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateHTTPResponse(response, data: data, provider: "Local TTS")
+        return data
+    }
+
+    /// Map PikoChan mood to Qwen3-TTS natural language instruct strings.
+    static func qwenEmotionTags(for mood: NotchManager.Mood) -> String {
+        switch mood {
+        case .neutral:      "Speak in a calm, natural tone"
+        case .playful:      "Speak in a playful, energetic tone"
+        case .irritated:    "Speak in a slightly annoyed, impatient tone"
+        case .proud:        "Speak in a proud, confident tone"
+        case .concerned:    "Speak in a worried, concerned tone"
+        case .snarky:       "Speak in a sarcastic, witty tone"
+        case .encouraging:  "Speak in a warm, encouraging tone"
+        }
     }
 
     // MARK: - Helpers

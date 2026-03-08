@@ -65,6 +65,9 @@ final class PikoGateway {
         case ttsEnd = "tts_end"
         case sttStart = "stt_start"
         case sttEnd = "stt_end"
+        case voiceServerStart = "voice_server_start"
+        case voiceServerReady = "voice_server_ready"
+        case voiceServerCrash = "voice_server_crash"
     }
 
     enum Subsystem: String, Encodable {
@@ -334,6 +337,29 @@ final class PikoGateway {
             "provider": provider,
             "duration_ms": String(durationMs),
             "transcript": truncate(transcript, max: 500),
+        ])
+    }
+
+    // MARK: - Voice Server Events
+
+    func logVoiceServerStart(model: String, port: Int) {
+        log(type: .voiceServerStart, subsystem: .voice, data: [
+            "model": model,
+            "port": String(port),
+        ])
+    }
+
+    func logVoiceServerReady(model: String, device: String) {
+        log(type: .voiceServerReady, subsystem: .voice, data: [
+            "model": model,
+            "device": device,
+        ])
+    }
+
+    func logVoiceServerCrash(reason: String, retryCount: Int) {
+        log(type: .voiceServerCrash, subsystem: .voice, data: [
+            "reason": reason,
+            "retry_count": String(retryCount),
         ])
     }
 

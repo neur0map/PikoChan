@@ -2,7 +2,7 @@ import Foundation
 
 struct PikoVoiceConfig {
     enum TTSProvider: String, CaseIterable {
-        case none, openai, elevenlabs, fishaudio, cartesia, falai
+        case none, openai, elevenlabs, fishaudio, cartesia, falai, local
     }
 
     enum STTProvider: String, CaseIterable {
@@ -19,6 +19,11 @@ struct PikoVoiceConfig {
     var sttModel: String
     var sttLanguage: String
 
+    // Local TTS fields.
+    var localModelPath: String
+    var localMoodMode: String   // "auto" or "custom"
+    var localLanguage: String
+
     // API keys from Keychain (not YAML).
     var ttsAPIKey: String?
     var sttAPIKey: String?
@@ -32,6 +37,9 @@ struct PikoVoiceConfig {
         sttProvider: .none,
         sttModel: "whisper-large-v3-turbo",
         sttLanguage: "en",
+        localModelPath: "",
+        localMoodMode: "auto",
+        localLanguage: "en",
         ttsAPIKey: nil,
         sttAPIKey: nil
     )
@@ -54,6 +62,10 @@ enum PikoVoiceConfigLoader {
         let sttModel = map["stt_model"]?.nonEmpty ?? PikoVoiceConfig.default.sttModel
         let sttLanguage = map["stt_language"]?.nonEmpty ?? PikoVoiceConfig.default.sttLanguage
 
+        let localModelPath = map["local_model_path"] ?? ""
+        let localMoodMode = map["local_mood_mode"]?.nonEmpty ?? "auto"
+        let localLanguage = map["local_language"]?.nonEmpty ?? "en"
+
         // API keys: voice-specific first, then fall back to shared provider keys.
         let ttsAPIKey: String? = {
             switch ttsProvider {
@@ -68,6 +80,8 @@ enum PikoVoiceConfigLoader {
                 return PikoKeychain.load(account: "cartesia_api_key")
             case .falai:
                 return PikoKeychain.load(account: "falai_api_key")
+            case .local:
+                return nil
             case .none:
                 return nil
             }
@@ -97,6 +111,9 @@ enum PikoVoiceConfigLoader {
             sttProvider: sttProvider,
             sttModel: sttModel,
             sttLanguage: sttLanguage,
+            localModelPath: localModelPath,
+            localMoodMode: localMoodMode,
+            localLanguage: localLanguage,
             ttsAPIKey: ttsAPIKey,
             sttAPIKey: sttAPIKey
         )

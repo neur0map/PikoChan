@@ -629,6 +629,7 @@ final class NotchManager {
                 isSpeaking = true
                 // Pass current mood so TTS models with emotion support can use it.
                 tts.moodHint = Self.moodToEmotionPrompt(currentMood)
+                tts.currentMood = currentMood
                 let audioData = try await tts.synthesize(text: text, config: voiceConfig)
 
                 // Write to temp file with correct extension — AVAudioPlayer

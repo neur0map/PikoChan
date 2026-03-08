@@ -16,6 +16,9 @@ struct PikoHome {
     var mcpDir: URL { root.appendingPathComponent("mcp", isDirectory: true) }
     var modelsDir: URL { root.appendingPathComponent("models", isDirectory: true) }
     var logsDir: URL { root.appendingPathComponent("logs", isDirectory: true) }
+    var voiceDir: URL { root.appendingPathComponent("voice", isDirectory: true) }
+    var voiceModelsDir: URL { voiceDir.appendingPathComponent("models", isDirectory: true) }
+    var voiceServerFile: URL { voiceDir.appendingPathComponent("server.py") }
 
     var personalityFile: URL { soulDir.appendingPathComponent("personality.yaml") }
     var moodFile: URL { soulDir.appendingPathComponent("mood.yaml") }
@@ -29,7 +32,7 @@ struct PikoHome {
     var mcpServersFile: URL { mcpDir.appendingPathComponent("servers.yaml") }
 
     func bootstrap(fileManager: FileManager = .default) throws {
-        let dirs = [root, soulDir, skillsDir, customSkillsDir, memoryDir, mcpDir, modelsDir, logsDir]
+        let dirs = [root, soulDir, skillsDir, customSkillsDir, memoryDir, mcpDir, modelsDir, logsDir, voiceDir, voiceModelsDir]
         for dir in dirs {
             try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         }
@@ -43,6 +46,8 @@ struct PikoHome {
         try writeIfMissing(weatherSkillFile, contents: Self.defaultWeatherSkill)
         try writeIfMissing(journalFile, contents: "# PikoChan Journal\n\n")
         try writeIfMissing(mcpServersFile, contents: "servers: []\n")
+        // Always overwrite server.py — it's machine-generated, not user-edited.
+        try Self.defaultServerPy.write(to: voiceServerFile, atomically: true, encoding: .utf8)
 
         // SQLite creates the DB file on first open — no need to pre-create.
     }
@@ -117,6 +122,9 @@ auto_speak: false
 stt_provider: none
 stt_model: whisper-large-v3-turbo
 stt_language: en
+local_model_path:
+local_mood_mode: auto
+local_language: en
 """
 
     static let defaultTerminalSkill = """
@@ -151,4 +159,151 @@ permissions:
 
 Check current weather and summarize it.
 """
+
+    // swiftlint:disable line_length
+    static let defaultServerPy = """
+#!/usr/bin/env python3
+\"\"\"PikoChan Local TTS Server — Qwen3-TTS via qwen-tts package.\"\"\"
+import argparse, io, os, sys, threading, time
+
+try:
+    import torch
+    import soundfile as sf
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import Response
+    from pydantic import BaseModel
+    from qwen_tts import Qwen3TTSModel
+    import uvicorn
+except ImportError as e:
+    print(f"Missing dependency: {e}", file=sys.stderr)
+    print("Install with: pip install qwen-tts fastapi uvicorn soundfile", file=sys.stderr)
+    sys.exit(1)
+
+
+def _parent_watchdog(parent_pid):
+    \"\"\"Exit when parent process (PikoChan) dies — prevents orphan servers.\"\"\"
+    while True:
+        try:
+            os.kill(parent_pid, 0)  # signal 0 = check if alive
+        except OSError:
+            print("Parent process died, shutting down.", file=sys.stderr)
+            os._exit(0)
+        time.sleep(2)
+
+
+app = FastAPI(title="PikoChan Local TTS")
+
+# Globals set at startup.
+_model = None
+_model_name = ""
+_device = "cpu"
+
+DEFAULT_VOICES = [
+    "Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric",
+    "Ryan", "Aiden", "Ono_Anna", "Sohee",
+]
+
+LANGUAGE_MAP = {
+    "en": "English", "zh": "Chinese", "ja": "Japanese",
+    "ko": "Korean", "de": "German", "fr": "French",
+    "ru": "Russian", "pt": "Portuguese", "es": "Spanish",
+    "it": "Italian",
+}
+
+
+class SynthesizeRequest(BaseModel):
+    text: str
+    voice: str = "Vivian"
+    prompt: str = ""
+    speed: float = 1.0
+    language: str = "en"
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "model": _model_name, "device": _device}
+
+
+@app.get("/voices")
+def voices():
+    return {"voices": DEFAULT_VOICES}
+
+
+@app.post("/synthesize")
+def synthesize(req: SynthesizeRequest):
+    if _model is None:
+        raise HTTPException(503, "Model not loaded")
+
+    try:
+        lang = LANGUAGE_MAP.get(req.language, req.language)
+        instruct = req.prompt if req.prompt else None
+
+        wavs, sr = _model.generate_custom_voice(
+            text=req.text,
+            language=lang,
+            speaker=req.voice,
+            instruct=instruct,
+        )
+
+        import numpy as np
+        audio = wavs[0]
+        # Ensure numpy array (model may return torch tensor).
+        if hasattr(audio, "cpu"):
+            audio = audio.cpu().numpy()
+
+        # Apply speed (simple resampling).
+        if req.speed != 1.0 and req.speed > 0:
+            indices = np.arange(0, len(audio), req.speed)
+            indices = indices[indices < len(audio)].astype(int)
+            audio = audio[indices]
+
+        # Encode as 16-bit PCM WAV — float32 WAV causes playback errors on macOS.
+        buf = io.BytesIO()
+        sf.write(buf, audio, sr, format="WAV", subtype="PCM_16")
+        buf.seek(0)
+
+        return Response(content=buf.read(), media_type="audio/wav")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Synthesis failed: {e}")
+
+
+def main():
+    global _model, _model_name, _device
+
+    parser = argparse.ArgumentParser(description="PikoChan Local TTS Server")
+    parser.add_argument("--model", required=True, help="Path to local model directory")
+    parser.add_argument("--port", type=int, default=7879)
+    parser.add_argument("--host", default="127.0.0.1")
+    args = parser.parse_args()
+
+    # Start watchdog — auto-exit if PikoChan dies (prevents orphan servers).
+    threading.Thread(target=_parent_watchdog, args=(os.getppid(),), daemon=True).start()
+
+    _model_name = os.path.basename(args.model)
+    print(f"Loading model from {args.model}...")
+
+    # MPS (Apple Silicon GPU) crashes on some ops used by Qwen3-TTS,
+    # so we default to CPU. CUDA works if available.
+    if torch.cuda.is_available():
+        _device = "cuda"
+    else:
+        _device = "cpu"
+    print(f"Using device: {_device}")
+
+    _model = Qwen3TTSModel.from_pretrained(
+        args.model,
+        device_map=_device,
+        dtype=torch.float32,
+    )
+
+    print(f"Model loaded. Starting server on {args.host}:{args.port}")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+
+
+if __name__ == "__main__":
+    main()
+"""
+    // swiftlint:enable line_length
 }

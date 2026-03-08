@@ -18,6 +18,11 @@ final class PikoVoiceConfigStore {
     var sttModel: String = "whisper-large-v3-turbo"
     var sttLanguage: String = "en"
 
+    // Local TTS fields.
+    var localModelPath: String = ""
+    var localMoodMode: String = "auto"
+    var localLanguage: String = "en"
+
     // API key fields for the settings UI — stored in Keychain, not YAML.
     var ttsAPIKey: String = ""
     var sttAPIKey: String = ""
@@ -36,6 +41,9 @@ final class PikoVoiceConfigStore {
         sttProvider = cfg.sttProvider
         sttModel = cfg.sttModel
         sttLanguage = cfg.sttLanguage
+        localModelPath = cfg.localModelPath
+        localMoodMode = cfg.localMoodMode
+        localLanguage = cfg.localLanguage
         ttsAPIKey = cfg.ttsAPIKey ?? ""
         sttAPIKey = cfg.sttAPIKey ?? ""
     }
@@ -52,6 +60,9 @@ final class PikoVoiceConfigStore {
         stt_provider: \(sttProvider.rawValue)
         stt_model: \(sttModel.trimmingCharacters(in: .whitespacesAndNewlines))
         stt_language: \(sttLanguage.trimmingCharacters(in: .whitespacesAndNewlines))
+        local_model_path: \(localModelPath.trimmingCharacters(in: .whitespacesAndNewlines))
+        local_mood_mode: \(localMoodMode)
+        local_language: \(localLanguage)
         """
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -76,6 +87,9 @@ final class PikoVoiceConfigStore {
             sttProvider: sttProvider,
             sttModel: sttModel,
             sttLanguage: sttLanguage,
+            localModelPath: localModelPath,
+            localMoodMode: localMoodMode,
+            localLanguage: localLanguage,
             ttsAPIKey: resolvedTTSKey,
             sttAPIKey: resolvedSTTKey
         )
@@ -91,6 +105,7 @@ final class PikoVoiceConfigStore {
         case .fishaudio:  PikoKeychain.load(account: "fishaudio_api_key")
         case .cartesia:   PikoKeychain.load(account: "cartesia_api_key")
         case .falai:      PikoKeychain.load(account: "falai_api_key")
+        case .local:      nil
         case .none:       nil
         }
     }
@@ -115,6 +130,7 @@ final class PikoVoiceConfigStore {
         case .fishaudio:  "fishaudio_api_key"
         case .cartesia:   "cartesia_api_key"
         case .falai:      "falai_api_key"
+        case .local:      nil
         case .none:       nil
         }
         guard let account else { return }
