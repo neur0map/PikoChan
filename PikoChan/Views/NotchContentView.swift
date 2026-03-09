@@ -4,6 +4,7 @@ import SwiftUI
 /// Lays out content relative to the notch and drives all state visuals.
 struct NotchContentView: View {
     @Bindable var manager: NotchManager
+    @State private var isHoveringNotch = false
     private var settings: PikoSettings { PikoSettings.shared }
 
     // MARK: - Computed Geometry
@@ -62,11 +63,19 @@ struct NotchContentView: View {
         .spring(response: 0.3, dampingFraction: 0.8)
     }
 
+    private var shadowRadius: CGFloat {
+        switch manager.state {
+        case .hidden:   0
+        case .hovered:  10
+        default:        isHoveringNotch ? 24 : 16
+        }
+    }
+
     private var shadowOpacity: Double {
         switch manager.state {
         case .hidden:   0.0
         case .hovered:  0.05
-        default:        0.15
+        default:        isHoveringNotch ? 0.25 : 0.15
         }
     }
 
@@ -166,12 +175,7 @@ struct NotchContentView: View {
                     onSpriteTapped: { manager.switchToAssistant() }
                 )
                 .padding(.top, manager.notchSize.height + settings.contentPadding)
-                .transition(
-                    .asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .top)),
-                        removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
-                    )
-                )
+                .transition(.blurReplace(.downUp))
             }
 
             // ── Foreground Content ──
@@ -184,7 +188,7 @@ struct NotchContentView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.bottom, 6)
-                        .transition(.opacity.combined(with: .offset(y: -4)))
+                        .transition(.blurReplace(.downUp))
                     }
 
                     manager.spriteImage
@@ -201,12 +205,7 @@ struct NotchContentView: View {
                         .padding(.top, 12)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 16)
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)),
-                                removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
-                            )
-                        )
+                        .transition(.blurReplace(.downUp))
                     }
 
                     if manager.state == .typing {
@@ -214,12 +213,7 @@ struct NotchContentView: View {
                             .padding(.top, 8)
                             .padding(.horizontal, 16)
                             .padding(.bottom, 12)
-                            .transition(
-                                .asymmetric(
-                                    insertion: .opacity.combined(with: .offset(y: 4)),
-                                    removal: .opacity.combined(with: .offset(y: 4))
-                                )
-                            )
+                            .transition(.blurReplace(.downUp))
                     }
 
                     if manager.state == .listening {
@@ -227,12 +221,7 @@ struct NotchContentView: View {
                         .padding(.top, 6)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 12)
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)),
-                                removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
-                            )
-                        )
+                        .transition(.blurReplace(.downUp))
                     }
 
                     if showsResponseBubble {
@@ -251,12 +240,7 @@ struct NotchContentView: View {
             if manager.state == .setup, let setupManager = manager.setupManager {
                 SetupView(manager: manager, setup: setupManager)
                     .padding(.top, manager.notchSize.height + settings.contentPadding)
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)),
-                            removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
-                        )
-                    )
+                    .transition(.blurReplace(.downUp))
             }
 
             // ── Hover peek indicator ──
@@ -276,12 +260,14 @@ struct NotchContentView: View {
         // Exception: compact music hover animates size smoothly.
         .frame(width: contentWidth, height: contentHeight)
         .clipShape(NotchShape(topCornerRadius: topRadius, bottomCornerRadius: bottomRadius))
-        .shadow(color: .black.opacity(shadowOpacity), radius: 20, y: 10)
+        .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, y: 10)
+        .animation(.smooth(duration: 0.3), value: isHoveringNotch)
         .animation(
             (manager.state == .musicCompact || manager.state == .musicHover) ? compactAnimation : nil,
             value: manager.isHoveringMusicArt
         )
         .onHover { hovering in
+            isHoveringNotch = hovering
             if hovering && manager.state == .hidden {
                 manager.transition(to: .hovered)
             } else if !hovering && manager.state == .hovered {

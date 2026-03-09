@@ -48,12 +48,7 @@ struct MusicExtendedView: View {
             spriteButton
         }
         .padding(.horizontal, 16)
-        .transition(
-            .asymmetric(
-                insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .top)),
-                removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
-            )
-        )
+        .transition(.blurReplace(.downUp))
     }
 
     // MARK: - Sprite Button
