@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-000000?style=flat&logo=apple&logoColor=white" />
   <img src="https://img.shields.io/badge/swift-6.0-F05138?style=flat&logo=swift&logoColor=white" />
-  <img src="https://img.shields.io/badge/version-0.4.0--alpha-blue?style=flat" />
+  <img src="https://img.shields.io/badge/version-0.5.2--alpha-blue?style=flat" />
   <img src="https://img.shields.io/github/license/neur0map/PikoChan?style=flat" />
   <img src="https://img.shields.io/badge/LLM-local--first-brightgreen?style=flat" />
 </p>
@@ -50,9 +50,9 @@ PikoChan draws from three projects that got specific things right:
 
 ---
 
-## Current State: v0.4.0-alpha
+## Current State: v0.5.2-alpha
 
-PikoChan has a brain, a soul, semantic memory, voice input/output, environmental awareness, a first-time setup wizard, companion personality, and filesystem guardrails. She can hear you, talk back, remember who you are, notice what you're doing, and evolve her personality across conversations.
+PikoChan has a brain, a soul, semantic memory, voice input/output, environmental awareness, terminal control, browser automation, a skills system, a now playing music widget, a first-time setup wizard, companion personality, and filesystem guardrails. She can hear you, talk back, remember who you are, notice what you're doing, run commands, open URLs, learn new abilities from Markdown files, and show you what's playing — all from inside the notch.
 
 **What works today:**
 
@@ -63,6 +63,12 @@ PikoChan has a brain, a soul, semantic memory, voice input/output, environmental
 - **Dynamic fal.ai models**: paste any fal.ai model ID, PikoChan fetches the OpenAPI schema and adapts — discovers text fields, voice options, and parameters automatically
 - **Heartbeat**: background awareness loop monitoring frontmost app, idle time, and time-of-day patterns. Proactive nudges when you've been idle or working too long
 - **Config commands**: PikoChan can modify her own config in response to conversation (schedule nudges, adjust behavior)
+- **Terminal control**: PikoChan can execute shell commands via `[shell:CMD]` tags — safe-list for auto-execution, block-list for dangerous commands, 30s timeout, output capped at 4000 chars
+- **Browser automation**: PikoChan can open URLs and perform Google searches via `[open:URL]` tags — blocks dangerous schemes (javascript:/data:/file:)
+- **Skills system**: Markdown files in `~/.pikochan/skills/` with YAML frontmatter teach PikoChan new abilities. Skills inject instructions into the system prompt. Settings → Skills tab for management
+- **Action pipeline**: LLM emits action tags → PikoActionHandler parses and executes → results re-queried to LLM for summary (skipHistory to avoid pollution)
+- **Now Playing music widget**: system-wide music detection via MediaRemote (native apps) and CoreAudio + browser window title parsing (YouTube, Spotify Web). iTunes Search API for album art. Playback controls via MediaRemote commands (native) or CGEvent media key simulation (browsers)
+- **Music interaction layers**: compact pill (album art + audio bars, same height as idle) → hover (track name) → click (full mini-player with controls + PikoChan sprite)
 - **Voice settings UI**: Settings → Voice tab with provider pickers, voice/model catalogs, API key sharing with AI Model tab, and Test TTS button
 - **Mic permissions**: proper `com.apple.security.device.audio-input` entitlement, native permission dialog, direct link to System Settings if denied
 - Nine LLM providers: Ollama (local), OpenAI, Anthropic, Apple Intelligence, Groq, Google Gemini, Mistral, DeepSeek, xAI Grok
@@ -77,10 +83,10 @@ PikoChan has a brain, a soul, semantic memory, voice input/output, environmental
 
 **What doesn't exist yet:**
 
-- No terminal or browser control
-- No browser automation
-- No skills system
 - No local/on-device TTS or STT
+- No MCP client for external tool servers
+- No accessibility/screen reading integration
+- No streaming TTS (sentence-by-sentence)
 
 ---
 
@@ -189,13 +195,19 @@ PikoChan is built in four layers, each with a clear responsibility:
 │              Layer 3: HANDS                 │
 │  PikoTerminal     — terminal control        │
 │  PikoBrowser      — browser automation      │
-│  PikoAccessibility — screen reading         │
-│  (v0.4.0 — remaining)                       │
+│  PikoActionHandler — action tag pipeline    │
+│  (v0.5.0 ✅)                                │
+├─────────────────────────────────────────────┤
+│           Layer 3.5: MUSIC                  │
+│  MediaRemoteBridge — private framework      │
+│  PikoNowPlaying  — hybrid music detection   │
+│  Music UI — compact / hover / extended      │
+│  (v0.5.2 ✅)                                │
 ├─────────────────────────────────────────────┤
 │              Layer 4: SKILLS                │
 │  Markdown skill files (YAML frontmatter)    │
 │  MCP client for external tool servers       │
-│  (v0.5.0 — planned)                         │
+│  (v0.5.0 ✅ — skills loaded, MCP planned)   │
 └─────────────────────────────────────────────┘
 ```
 
@@ -203,9 +215,11 @@ PikoChan is built in four layers, each with a clear responsibility:
 
 **Layer 2** is the brain — multi-provider LLM orchestration (Ollama, OpenAI, Anthropic, Apple Intelligence), composable personality via `PikoSoul`, semantic memory with Arctic Embed XS embeddings and cosine similarity recall, an HTTP gateway for headless access, structured JSONL logging, and a first-time setup wizard.
 
-**Layer 3** is the hands — how PikoChan will interact with your Mac. Terminal commands, browser automation, screen reading, and a heartbeat loop for background awareness.
+**Layer 3** is the hands — how PikoChan interacts with your Mac. Terminal commands via `[shell:CMD]` tags, browser automation via `[open:URL]` tags, with safe-list/block-list controls and action result re-querying.
 
-**Layer 4** is the skills — plain Markdown files that teach PikoChan new abilities, plus MCP integration for external tools.
+**Layer 3.5** is the music — system-wide Now Playing detection via MediaRemote (native apps) and CoreAudio + browser window title parsing (YouTube, Spotify Web). iTunes Search API for album art. Three interaction layers: compact pill → hover → full mini-player.
+
+**Layer 4** is the skills — plain Markdown files in `~/.pikochan/skills/` that teach PikoChan new abilities. MCP integration for external tools is planned.
 
 ---
 
@@ -257,11 +271,10 @@ PikoChan learns from behavioral feedback and uses fewer tokens per message.
 - **Trivial message skip**: extraction skipped for "hi" / "ok" / "lol" style messages (user < 15 chars, assistant < 100 chars). Logged as `extraction_skip` gateway event
 - **Expanded companion behavior**: stronger anti-interrogation rules, memory relevance framing, topic-matching guidance in system prompt and post-history reminder
 
-### v0.4.0 — Voice & Awareness (in progress)
+### v0.4.0 — Voice & Awareness ✅
 
 PikoChan can hear, speak, and notice what's happening on your Mac.
 
-**Done:**
 - **Voice input (STT)**: push-to-talk mic capture (AVAudioEngine, 16kHz mono WAV) with cloud transcription (Groq Whisper, OpenAI Whisper, Deepgram Nova-2)
 - **Voice output (TTS)**: cloud speech synthesis with 5 providers (OpenAI, ElevenLabs, Fish Audio, Cartesia, fal.ai). File-based playback via AVAudioPlayer
 - **Mood-aware TTS**: PikoChan's current mood is sent as an emotion prompt to TTS models that support it (e.g. Qwen-3-TTS)
@@ -271,21 +284,27 @@ PikoChan can hear, speak, and notice what's happening on your Mac.
 - **Voice settings UI**: full Settings → Voice tab with provider pickers, voice/model catalogs, shared API keys, Test TTS
 - **Mic entitlement**: `com.apple.security.device.audio-input` + native permission flow
 
-**Remaining:**
-- **Terminal control**: detect running terminals, type commands via AppleScript
-- **Browser automation**: open URLs, execute JavaScript, read page content
-- **Screen reading**: Accessibility API integration for frontmost app context
-- **Local STT/TTS**: on-device transcription and speech synthesis via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) or Whisper (MLX)
-- **Streaming TTS**: sentence-by-sentence synthesis to eliminate the delay between text and voice
-- **Voice quality tuning**: extensive testing across TTS models, voices, and emotion settings to find PikoChan's signature voice
+### v0.5.0 — Skills + Terminal + Browser ✅
 
-### v0.5.0 — Skills
+PikoChan can run commands, open URLs, and learn new tricks.
 
-Teach PikoChan new tricks.
+- **Skills loader**: `PikoSkillLoader` scans `~/.pikochan/skills/` + `skills/custom/` for Markdown files with YAML frontmatter. Skills inject instructions into the system prompt
+- **Terminal control**: `PikoTerminal` executes shell commands via Foundation.Process (`/bin/zsh -c`). Safe-list auto-execute, block-list rejection, 30s timeout, 4000 char output cap
+- **Browser automation**: `PikoBrowser` opens URLs via NSWorkspace, Google search helper. Blocks dangerous schemes (javascript:/data:/file:)
+- **Action pipeline**: `PikoActionHandler` parses `[shell:CMD]` and `[open:URL]` tags from LLM response → executes → re-queries LLM with results for a summary (skipHistory to avoid pollution)
+- **Action cards**: `ActionCardView` shows pending actions with Run/Cancel, completed actions with exit code + collapsible output
+- **Settings**: Skills tab between Voice and Awareness for skill management and terminal/browser toggles
 
-- **Skills loader**: PikoChan scans `~/.pikochan/skills/` for Markdown files with YAML frontmatter. Each file teaches her a new ability
-- **Built-in skills**: terminal helper, browser automation, weather check
-- **MCP client**: connect to external tool servers via the [official Swift MCP SDK](https://github.com/modelcontextprotocol/swift-sdk)
+### v0.5.2 — Now Playing Music Widget ✅
+
+PikoChan detects and controls music playing on your Mac.
+
+- **MediaRemote bridge**: `MediaRemoteBridge` dlopen/dlsym bridge to private MediaRemote.framework for native app track info, artwork, and play state
+- **Browser fallback**: CoreAudio device activity detection + Accessibility API window title parsing for YouTube, Spotify Web, and other browser-based players
+- **iTunes Search API**: fetches album art when MediaRemote has none (browser fallback), upgrades to 600×600 hi-res
+- **Playback controls**: MediaRemote sendCommand for native apps, CGEvent media key simulation (subtype 8, keycodes 16/17/20) for browsers
+- **Music interaction layers**: compact pill (album art + audio bars, same height as idle, horizontal-only expansion) → hover (track name revealed) → click (full mini-player with controls + PikoChan sprite)
+- **Panel stability**: `suppressNextGlobalClick` prevents button clicks from dismissing, 5-second grace period before collapsing on pause/skip, `userControlUntil` cooldown prevents poll overriding user actions
 
 ### v0.6.0 — Community & Polish
 
@@ -343,8 +362,8 @@ PikoChan/
 │       ├── ArcticEmbedXS.mlpackage  # Snowflake Arctic Embed XS (384-dim, 22M params, CoreML)
 │       └── arctic_vocab.txt         # BERT WordPiece vocabulary (30522 tokens)
 ├── Core/
-│   ├── NotchManager.swift         # State machine, mouse monitors, panel management, voice orchestration
-│   ├── NotchState.swift           # Six-state enum (hidden, hovered, expanded, typing, listening, setup)
+│   ├── NotchManager.swift         # State machine, mouse monitors, panel management, voice + music orchestration
+│   ├── NotchState.swift           # Nine-state enum (hidden, hovered, expanded, typing, listening, setup, musicCompact, musicHover, musicExtended)
 │   ├── SetupManager.swift         # First-time setup wizard state + validation + migration
 │   ├── PikoSettings.swift         # Observable settings store backed by UserDefaults
 │   ├── PikoHTTPServer.swift       # NWListener HTTP server (port 7878), all API endpoints
@@ -357,6 +376,14 @@ PikoChan/
 │   │   ├── PikoVoiceConfig.swift      # Voice config struct + YAML loader
 │   │   ├── PikoVoiceConfigStore.swift # Observable voice config for settings UI
 │   │   └── FalAISchema.swift          # Dynamic fal.ai OpenAPI schema fetcher
+│   ├── Skills/
+│   │   ├── PikoSkillLoader.swift    # Markdown skill scanner + system prompt builder
+│   │   ├── PikoTerminal.swift       # Shell command execution (safe-list/block-list)
+│   │   ├── PikoBrowser.swift        # URL opening + Google search
+│   │   └── PikoActionHandler.swift  # Action tag parser + execution orchestrator
+│   ├── Music/
+│   │   ├── MediaRemoteBridge.swift  # dlopen/dlsym bridge to private MediaRemote.framework
+│   │   └── PikoNowPlaying.swift     # Hybrid music detection (MR + CoreAudio + browser titles)
 │   └── Brain/
 │       ├── PikoBrain.swift        # LLM orchestrator — multi-provider, streaming, history
 │       ├── PikoSoul.swift         # Personality YAML → system prompt + post-history reminder
@@ -382,10 +409,17 @@ PikoChan/
 │   │   ├── SetupProviderConfigStep.swift  # API key / Ollama validation
 │   │   ├── SetupMemoryStep.swift  # Embedding check + memory migration
 │   │   └── SetupSummaryStep.swift # Checklist + Let's go!
+│   ├── Music/
+│   │   ├── AudioBarsView.swift      # Animated audio level bars
+│   │   ├── MusicCompactView.swift   # Compact pill (album art + bars)
+│   │   ├── MusicExtendedView.swift  # Full mini-player (art + info + controls + sprite)
+│   │   └── MusicMiniStripView.swift # Thin strip in assistant views (tap to return)
+│   ├── ActionCardView.swift         # Shell/browser action cards (pending/completed)
 │   └── Settings/
 │       ├── AIModelTab.swift       # Provider picker, model config, connection test
 │       ├── SoulTab.swift          # Personality editing + memory management + re-run setup
 │       ├── VoiceTab.swift         # TTS/STT provider config, voice pickers, test button
+│       ├── SkillsTab.swift        # Skills management, terminal/browser toggles
 │       ├── AwarenessTab.swift     # Heartbeat/awareness settings
 │       ├── AppearanceTab.swift
 │       ├── BehaviorTab.swift
@@ -442,6 +476,10 @@ Everything is human-readable, git-friendly, and portable. Copy the folder to a n
 | Embedding fallback | Apple NLEmbedding | 512-dim, built-in, lower quality |
 | Tokenizer | WordPiece (BERT-compatible) | 30522 vocab, max 128 tokens |
 | Similarity | Accelerate.framework (vDSP) | Hardware-accelerated cosine similarity |
+| Now Playing | MediaRemote.framework (private) | dlopen/dlsym runtime bridge, no direct linking |
+| Music fallback | CoreAudio + Accessibility API | Audio device activity + browser window title parsing |
+| Album art | iTunes Search API | Free, no API key, 600×600 hi-res artwork |
+| Media keys | CGEvent (NSEvent) | Synthetic media key events for browser playback control |
 | HTTP Server | Network.framework (NWListener) | Zero-dependency TCP server |
 | Database | SQLite (C API) | Chat history, memories, embedding vectors |
 | Logging | Custom JSONL | Rolling daily, auto-prune |
