@@ -114,13 +114,13 @@ Build and run (**⌘R**). PikoChan will appear in your notch. Hover below the no
 
 ## Contributing
 
-PikoChan is in early alpha. If you're interested in contributing, here's what would help most right now:
+PikoChan is in early alpha. Read **[CONTRIBUTING.md](CONTRIBUTING.md)** before opening a PR — PRs that don't follow the guidelines will be rejected.
 
-- **Testing on different MacBook models** — notch geometry varies between generations
-- **UI/UX feedback** — animation timing, interaction patterns, visual polish
-- **Swift/AppKit expertise** — especially around NSPanel behavior, Accessibility API, and MLX integration
-
-Open an issue or submit a PR. No contribution guidelines yet — just be decent.
+What helps most right now:
+- Testing on different MacBook models (notch geometry varies)
+- UI/UX feedback (animation timing, interaction patterns)
+- Bug reports with reproduction steps
+- Swift/AppKit expertise (NSPanel, Accessibility API, CoreAudio)
 
 ---
 
