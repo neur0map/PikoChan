@@ -382,7 +382,23 @@ struct VoiceTab: View {
             }
             .pickerStyle(.menu)
 
-            if config.sttProvider != .none {
+            if config.sttProvider == .apple {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                    Text("On-device streaming — no API key needed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Picker("Language", selection: $config.sttLanguage) {
+                    ForEach(Self.languages, id: \.code) { lang in
+                        Text(lang.label).tag(lang.code)
+                    }
+                }
+                .pickerStyle(.menu)
+            } else if config.sttProvider != .none {
                 sttModelPicker
 
                 Picker("Language", selection: $config.sttLanguage) {
@@ -461,6 +477,9 @@ struct VoiceTab: View {
                 }
             } else {
                 Picker("Voice", selection: $config.ttsVoiceId) {
+                    if !voices.contains(where: { $0.id == config.ttsVoiceId }) {
+                        Text(config.ttsVoiceId.isEmpty ? "—" : config.ttsVoiceId).tag(config.ttsVoiceId)
+                    }
                     ForEach(voices, id: \.id) { voice in
                         Text(voice.label).tag(voice.id)
                     }
@@ -477,6 +496,9 @@ struct VoiceTab: View {
         let models = Self.ttsModels[config.ttsProvider] ?? []
         if !models.isEmpty {
             Picker("Model", selection: $config.ttsModel) {
+                if !models.contains(where: { $0.id == config.ttsModel }) {
+                    Text(config.ttsModel.isEmpty ? "—" : config.ttsModel).tag(config.ttsModel)
+                }
                 ForEach(models, id: \.id) { model in
                     Text(model.label).tag(model.id)
                 }
@@ -504,6 +526,10 @@ struct VoiceTab: View {
         let models = Self.sttModels[config.sttProvider] ?? []
         if !models.isEmpty {
             Picker("Model", selection: $config.sttModel) {
+                // Fallback tag prevents "invalid selection" warning during provider transitions.
+                if !models.contains(where: { $0.id == config.sttModel }) {
+                    Text(config.sttModel.isEmpty ? "—" : config.sttModel).tag(config.sttModel)
+                }
                 ForEach(models, id: \.id) { model in
                     Text(model.label).tag(model.id)
                 }
@@ -662,6 +688,7 @@ struct VoiceTab: View {
         case .groq:     config.sttModel = "whisper-large-v3-turbo"
         case .openai:   config.sttModel = "whisper-1"
         case .deepgram: config.sttModel = "nova-2"
+        case .apple:    break
         case .none:     break
         }
     }
@@ -683,6 +710,7 @@ struct VoiceTab: View {
     private func sttProviderLabel(_ provider: PikoVoiceConfig.STTProvider) -> String {
         switch provider {
         case .none:     "None"
+        case .apple:    "Apple (On-Device)"
         case .groq:     "Groq (Whisper)"
         case .openai:   "OpenAI (Whisper)"
         case .deepgram: "Deepgram (Nova-2)"

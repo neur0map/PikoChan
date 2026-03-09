@@ -40,11 +40,21 @@ struct ActivityFeedView: View {
                 .buttonStyle(.plain)
                 .help("New chat")
 
-                // Mini mode buttons (only in idle/expanded state)
+                // Mini ghost buttons (only in idle/expanded state)
                 if manager.state == .expanded {
                     VStack(spacing: 4) {
-                        miniButton(icon: "keyboard", action: { onTextTapped?() })
-                        miniButton(icon: "waveform", action: { onMicTapped?() })
+                        GhostIconButton(
+                            icon: "keyboard",
+                            action: { onTextTapped?() },
+                            iconSize: 9,
+                            hitSize: 22
+                        )
+                        GhostIconButton(
+                            icon: "waveform",
+                            action: { onMicTapped?() },
+                            iconSize: 9,
+                            hitSize: 22
+                        )
                     }
                     .transition(.opacity)
                 }
@@ -62,23 +72,6 @@ struct ActivityFeedView: View {
                 previousItemCount = new
             }
         }
-    }
-
-    // MARK: - Mini Button
-
-    private func miniButton(icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.white.opacity(0.45))
-                .frame(width: 22, height: 22)
-                .background(
-                    Circle()
-                        .fill(.white.opacity(0.07))
-                        .overlay(Circle().strokeBorder(.white.opacity(0.1), lineWidth: 0.5))
-                )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Feed Content

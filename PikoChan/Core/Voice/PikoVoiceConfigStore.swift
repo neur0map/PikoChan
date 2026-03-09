@@ -118,6 +118,7 @@ final class PikoVoiceConfigStore {
         case .groq:     PikoKeychain.load(account: "groq_api_key")
         case .openai:   PikoKeychain.load(account: "openai_api_key")
         case .deepgram: PikoKeychain.load(account: "deepgram_api_key")
+        case .apple:    nil
         case .none:     nil
         }
     }
@@ -147,6 +148,7 @@ final class PikoVoiceConfigStore {
         case .groq:     "groq_stt_api_key"
         case .openai:   "openai_stt_api_key"
         case .deepgram: "deepgram_api_key"
+        case .apple:    nil
         case .none:     nil
         }
         guard let account else { return }

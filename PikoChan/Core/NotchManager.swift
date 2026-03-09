@@ -31,6 +31,7 @@ final class NotchManager {
     var lastErrorOpensSettings: Bool = false
     var isResponseExpanded: Bool = false
     var showsChatHistory: Bool = false
+    var showCopyFlash: Bool = false
 
     var recentHistory: [ChatTurn] {
         brain.history.suffix(3).map { turn in
@@ -74,6 +75,7 @@ final class NotchManager {
     var voiceCapture: PikoAudioCapture?
     var stt: PikoSTT?
     var tts: PikoTTS?
+    var appleSTT: PikoAppleSTT?
     var isRecording: Bool = false
     var isSpeaking: Bool = false
     private var lastInputWasVoice: Bool = false
@@ -340,7 +342,7 @@ final class NotchManager {
     }
 
     var activeContentWidth: CGFloat {
-        hasFeedContent ? 360 : 290
+        hasFeedContent ? 360 : 320
     }
 
     var showsResponseBubble: Bool {
@@ -392,11 +394,18 @@ final class NotchManager {
             }
         }
 
-        // Legacy layout: sprite above controls above response bubble.
-        let expandedHeight = notchSize.height + pad + sprite + 12 + 36 + 16 + responseBlockHeight
-        let typingHeight = notchSize.height + pad + sprite + 8 + 34 + 12 + responseBlockHeight
-        let listeningHeight = notchSize.height + pad + sprite + 6 + 28 + 2 + 44 + 12 + responseBlockHeight
-        return max(expandedHeight, max(typingHeight, listeningHeight))
+        // Vertical: sprite centered, input bar below, response below that.
+        let top = notchSize.height + pad
+        switch state {
+        case .expanded:
+            return top + sprite + 10 + 46 + 10 + responseBlockHeight
+        case .typing:
+            return top + sprite + 8 + 50 + 12 + responseBlockHeight
+        case .listening:
+            return top + sprite + 6 + 28 + 50 + 12 + responseBlockHeight
+        default:
+            return top + sprite + 10
+        }
     }
 
     // MARK: - State Transitions
@@ -798,6 +807,28 @@ final class NotchManager {
             }
 
             do {
+                // Set up Apple streaming STT if selected.
+                let voiceConfig = PikoVoiceConfigStore.shared.currentConfig
+                if voiceConfig.sttProvider == .apple {
+                    if appleSTT == nil { appleSTT = PikoAppleSTT() }
+                    if !PikoAppleSTT.isAuthorized {
+                        let panel = self.panel
+                        panel?.level = .floating
+                        let authorized = await PikoAppleSTT.requestAuthorization()
+                        panel?.level = .screenSaver
+                        guard authorized else {
+                            setError(message: "Speech recognition denied", suggestion: "Enable in System Settings → Privacy")
+                            return
+                        }
+                    }
+                    // Start streaming — partial results update inputText live.
+                    appleSTT?.onPartialResult = { [weak self] text in
+                        self?.inputText = text
+                    }
+                    let request = appleSTT?.startStreaming(language: voiceConfig.sttLanguage)
+                    capture.speechRecognitionRequest = request
+                }
+
                 try capture.startCapture()
                 isRecording = true
             } catch {
@@ -855,6 +886,53 @@ final class NotchManager {
                 setError(message: "STT failed", suggestion: error.localizedDescription)
                 PikoGateway.shared.logError(
                     message: "STT failed: \(error.localizedDescription)",
+                    subsystem: .voice
+                )
+            }
+        }
+    }
+
+    /// STT dictation: transcribes into inputText without auto-submitting.
+    /// For Apple STT, text was already streaming live — just stop.
+    /// For API providers, sends audio for batch transcription.
+    func stopRecordingAndDictate() {
+        guard isRecording else { return }
+        isRecording = false
+
+        let voiceConfig = PikoVoiceConfigStore.shared.currentConfig
+
+        // Apple streaming STT — text already in inputText from live callbacks.
+        if voiceConfig.sttProvider == .apple {
+            appleSTT?.stopStreaming()
+            voiceCapture?.speechRecognitionRequest = nil
+            _ = voiceCapture?.stopCapture()
+            return
+        }
+
+        // API-based STT — batch transcription.
+        guard let audioData = voiceCapture?.stopCapture(), !audioData.isEmpty else {
+            return
+        }
+
+        guard voiceConfig.sttProvider != .none else {
+            setError(message: "No STT provider configured", suggestion: "Set one in Settings → Voice")
+            return
+        }
+
+        Task {
+            do {
+                guard let stt else { return }
+                let transcript = try await stt.transcribe(audioData: audioData, config: voiceConfig)
+                guard !transcript.isEmpty else { return }
+                if inputText.isEmpty {
+                    inputText = transcript
+                } else {
+                    inputText += " " + transcript
+                }
+            } catch {
+                setError(message: "STT failed", suggestion: error.localizedDescription)
+                PikoGateway.shared.logError(
+                    message: "Dictation STT failed: \(error.localizedDescription)",
                     subsystem: .voice
                 )
             }

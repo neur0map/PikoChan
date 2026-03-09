@@ -6,7 +6,7 @@ struct PikoVoiceConfig {
     }
 
     enum STTProvider: String, CaseIterable {
-        case none, groq, deepgram, openai
+        case none, apple, groq, deepgram, openai
     }
 
     var ttsProvider: TTSProvider
@@ -97,6 +97,8 @@ enum PikoVoiceConfigLoader {
                     ?? PikoKeychain.load(account: "openai_api_key")
             case .deepgram:
                 return PikoKeychain.load(account: "deepgram_api_key")
+            case .apple:
+                return nil // No API key — on-device.
             case .none:
                 return nil
             }

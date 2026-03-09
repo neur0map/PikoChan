@@ -46,7 +46,7 @@ private struct UserFeedRow: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.white.opacity(0.15))
+                        .fill(.white.opacity(0.10))
                 )
         }
     }
@@ -73,7 +73,7 @@ private struct AssistantFeedRow: View {
                 .padding(.vertical, 7)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(red: 0.0, green: 0.48, blue: 1.0).opacity(0.55))
+                        .fill(Color(red: 0.0, green: 0.48, blue: 1.0).opacity(0.35))
                 )
             Spacer(minLength: 0)
         }
@@ -300,7 +300,7 @@ struct StreamingFeedRow: View {
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(red: 0.0, green: 0.48, blue: 1.0).opacity(0.55))
+                    .fill(Color(red: 0.0, green: 0.48, blue: 1.0).opacity(0.35))
             )
             Spacer(minLength: 0)
         }

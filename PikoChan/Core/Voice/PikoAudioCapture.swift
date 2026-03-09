@@ -1,4 +1,5 @@
 import AVFoundation
+import Speech
 
 @MainActor
 final class PikoAudioCapture {
@@ -6,6 +7,9 @@ final class PikoAudioCapture {
     var hasPermission: Bool = false
     /// 0.0–1.0, driven by mic RMS. Read from WaveView.
     var audioLevel: Float = 0
+
+    /// When set, raw audio buffers are also fed to this speech recognition request.
+    var speechRecognitionRequest: SFSpeechAudioBufferRecognitionRequest?
 
     private var audioEngine: AVAudioEngine?
     private var sampleBuffer: [Float] = []
@@ -50,8 +54,21 @@ final class PikoAudioCapture {
         }
     }
 
+    /// Cached engine to avoid cold-start lag on first recording.
+    private var cachedEngine: AVAudioEngine?
+
+    /// Pre-warm the audio engine so first recording starts instantly.
+    func warmUp() {
+        if cachedEngine == nil {
+            cachedEngine = AVAudioEngine()
+            // Touch inputNode to trigger HAL init in background.
+            _ = cachedEngine?.inputNode.outputFormat(forBus: 0)
+        }
+    }
+
     func startCapture() throws {
-        let engine = AVAudioEngine()
+        let engine = cachedEngine ?? AVAudioEngine()
+        cachedEngine = nil
         let inputNode = engine.inputNode
         let hwFormat = inputNode.outputFormat(forBus: 0)
 
@@ -82,6 +99,9 @@ final class PikoAudioCapture {
         let bufferSize: AVAudioFrameCount = 4096
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: hwFormat) { [weak self] buffer, _ in
             guard let self else { return }
+
+            // Feed raw buffer to speech recognition if active.
+            self.speechRecognitionRequest?.append(buffer)
 
             // Convert to 16kHz mono.
             let frameCapacity = AVAudioFrameCount(
@@ -134,6 +154,9 @@ final class PikoAudioCapture {
         let samples = sampleBuffer
         sampleBuffer.removeAll()
         lock.unlock()
+
+        // Pre-warm for next recording.
+        warmUp()
 
         guard !samples.isEmpty else { return nil }
         return encodeWAV(samples: samples, sampleRate: UInt32(sampleRate))

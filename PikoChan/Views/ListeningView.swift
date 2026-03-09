@@ -1,16 +1,19 @@
 import SwiftUI
 
-/// Listening state controls with tap-to-toggle mic button.
+/// Listening state (voice-to-voice): waveform bars + back/mic controls.
 struct ListeningView: View {
     @Bindable var manager: NotchManager
 
     var body: some View {
-        VStack(spacing: 6) {
-            WaveView(audioLevel: manager.voiceCapture?.audioLevel ?? 0)
-                .padding(.horizontal, 8)
+        VStack(spacing: 8) {
+            // Live waveform bars
+            DictationBarsView(
+                readLevel: { [weak manager] in manager?.voiceCapture?.audioLevel ?? 0 },
+                maxBarHeight: 32
+            )
 
-            HStack(spacing: 20) {
-                // Back button → return to expanded.
+            // Controls: back + mic
+            HStack(spacing: 24) {
                 Button {
                     if manager.isRecording {
                         manager.isRecording = false
@@ -20,13 +23,12 @@ struct ListeningView: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.white.opacity(0.40))
                         .frame(width: 36, height: 36)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
-                // Tap-to-toggle mic button.
                 Button {
                     if manager.isRecording {
                         manager.stopRecordingAndTranscribe()
@@ -34,16 +36,14 @@ struct ListeningView: View {
                         manager.startRecording()
                     }
                 } label: {
-                    Image(systemName: manager.isRecording ? "stop.circle.fill" : "mic.circle.fill")
-                        .font(.system(size: 32, weight: .medium))
-                        .foregroundStyle(manager.isRecording ? .red : .white.opacity(0.7))
-                        .symbolEffect(.pulse, isActive: manager.isRecording)
-                        .frame(width: 44, height: 44)
+                    Image(systemName: manager.isRecording ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(manager.isRecording ? .red.opacity(0.7) : .white.opacity(0.45))
+                        .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.top, 2)
         }
     }
 }

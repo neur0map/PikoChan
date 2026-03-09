@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.5.4-alpha — Notch UI Redesign + Apple STT
+
+Minimal ghost aesthetic and on-device voice input.
+
+- **Unified input bar**: replaced separate Type/Talk capsule buttons with a single input bar below the centered sprite. Mic icon triggers STT dictation, separate voice circle for voice-to-voice
+- **STT dictation**: tap mic to start recording — words appear live in the text field as you speak. Smooth `.blurReplace` transition swaps text field for waveform bars inside the same capsule
+- **DictationBarsView**: Canvas-based 60fps waveform visualization using TimelineView. Closure-based `readLevel` for live audio data, 24 bars with layered sine waves and gaussian envelope
+- **Apple on-device STT**: SFSpeechRecognizer streaming provider — no API key, no network. Audio buffers shared between PikoAudioCapture and SFSpeechAudioBufferRecognitionRequest for live partial results
+- **Floating response**: removed response bubble — text appears directly (11pt, white 65% opacity). Long-press to copy with flash overlay
+- **Ghost buttons**: icon-only buttons invisible at rest, revealed on hover/press. Used in activity feed mini controls
+- **AVAudioEngine pre-warming**: engine pre-created at app launch and after each stop to eliminate cold-start recording lag
+- **State-specific panel height**: NotchManager returns height per state instead of max-of-all-states, preventing oversized black void
+- **Picker resilience**: fallback tags in model/voice pickers prevent SwiftUI "invalid selection" warnings during provider transitions
+
 ## v0.5.3-alpha — Activity Feed & Chat Redesign
 
 PikoChan gets a proper chat interface with an activity feed inside the notch.

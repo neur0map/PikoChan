@@ -26,7 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let manager = NotchManager(brain: brain)
 
         // Voice components.
-        manager.voiceCapture = PikoAudioCapture()
+        let capture = PikoAudioCapture()
+        capture.warmUp()
+        manager.voiceCapture = capture
         manager.stt = PikoSTT()
         manager.tts = PikoTTS()
 

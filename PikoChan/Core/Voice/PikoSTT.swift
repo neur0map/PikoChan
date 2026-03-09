@@ -35,6 +35,8 @@ final class PikoSTT {
                 apiKey: apiKey,
                 language: config.sttLanguage
             )
+        case .apple:
+            throw PikoVoiceError.sttFailed(detail: "Apple STT uses streaming — not batch")
         case .none:
             throw PikoVoiceError.sttFailed(detail: "No STT provider configured")
         }
