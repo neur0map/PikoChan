@@ -19,6 +19,11 @@ struct PikoAction: Identifiable {
     let kind: Kind
     let needsConfirmation: Bool
     var status: Status = .pending
+
+    var isPending: Bool {
+        if case .pending = status { return true }
+        return false
+    }
 }
 
 @Observable
@@ -26,6 +31,8 @@ struct PikoAction: Identifiable {
 final class PikoActionHandler {
     var actions: [PikoAction] = []
     var isExecuting = false
+    /// When true, all commands auto-execute without approval (user clicked "Always").
+    var sessionAutoApprove = false
 
     // MARK: - Parsing
 
@@ -53,7 +60,7 @@ final class PikoActionHandler {
                 continue
             }
 
-            let needsConfirm = !(config.skillsAutoExecuteSafe && PikoTerminal.isSafeCommand(command))
+            let needsConfirm = !sessionAutoApprove && !(config.skillsAutoExecuteSafe && PikoTerminal.isSafeCommand(command))
             parsed.append(PikoAction(kind: .shell(command: command), needsConfirmation: needsConfirm))
         }
 
@@ -68,7 +75,7 @@ final class PikoActionHandler {
                 guard config.skillsTerminalEnabled else { continue }
                 let resolvedPath = Self.resolveOpenPath(target)
                 let command = "open \"\(resolvedPath)\""
-                let needsConfirm = !(config.skillsAutoExecuteSafe && PikoTerminal.isSafeCommand(command))
+                let needsConfirm = !sessionAutoApprove && !(config.skillsAutoExecuteSafe && PikoTerminal.isSafeCommand(command))
                 parsed.append(PikoAction(kind: .shell(command: command), needsConfirmation: needsConfirm))
             } else {
                 guard config.skillsBrowserEnabled else { continue }
@@ -190,7 +197,7 @@ final class PikoActionHandler {
             }
         }
 
-        parts.append("\nSummarize these results for the user in a helpful way. Do NOT use [shell:], [open:], or any action tags in your response.")
+        parts.append("\nSummarize these results for the user in a helpful way. Use plain text only — no markdown formatting like **bold** or *italic*. Do NOT use [shell:], [open:], or any action tags in your response.")
         return parts.joined(separator: "\n")
     }
 

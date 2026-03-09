@@ -180,60 +180,118 @@ struct NotchContentView: View {
 
             // ── Foreground Content ──
             if manager.state == .expanded || manager.state == .typing || manager.state == .listening {
-                VStack(spacing: 0) {
-                    // Mini music strip when music is playing during assistant mode.
-                    if let np = manager.nowPlaying, np.isPlaying, np.hasTrack {
-                        MusicMiniStripView(nowPlaying: np) {
-                            manager.switchToMusicExtended()
+                if manager.hasFeedContent {
+                    // Feed layout: sprite-left + feed + controls below.
+                    VStack(spacing: 0) {
+                        // Mini music strip when music is playing during assistant mode.
+                        if let np = manager.nowPlaying, np.isPlaying, np.hasTrack {
+                            MusicMiniStripView(nowPlaying: np) {
+                                manager.switchToMusicExtended()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 6)
+                            .transition(.blurReplace(.downUp))
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 6)
-                        .transition(.blurReplace(.downUp))
-                    }
 
-                    manager.spriteImage
-                        .resizable()
-                        .interpolation(.none)
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: settings.spriteSize)
-
-                    if manager.state == .expanded {
-                        ExpandedView(
+                        // Activity feed with sprite on the left + mini controls.
+                        ActivityFeedView(
+                            manager: manager,
+                            isExpanded: manager.isFeedExpanded,
                             onTextTapped: { manager.transition(to: .typing) },
-                            onMicTapped: { manager.transition(to: .listening) }
+                            onMicTapped: { manager.transition(to: .listening) },
+                            onNewChat: {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                    manager.clearFeed()
+                                    manager.actionHandler.reset()
+                                    manager.lastResponseText = ""
+                                    manager.lastResponseError = nil
+                                    manager.transition(to: .typing)
+                                }
+                            }
                         )
-                        .padding(.top, 12)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 16)
-                        .transition(.blurReplace(.downUp))
-                    }
+                        .padding(.horizontal, 12)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                manager.isFeedExpanded.toggle()
+                                manager.updateVisibleContentRect()
+                            }
+                        }
 
-                    if manager.state == .typing {
-                        TypingView(manager: manager)
-                            .padding(.top, 8)
+                        if manager.state == .typing {
+                            TypingView(manager: manager)
+                                .padding(.top, 8)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 12)
+                                .transition(.blurReplace(.downUp))
+                        }
+
+                        if manager.state == .listening {
+                            ListeningView(manager: manager)
+                            .padding(.top, 6)
                             .padding(.horizontal, 16)
                             .padding(.bottom, 12)
                             .transition(.blurReplace(.downUp))
+                        }
                     }
-
-                    if manager.state == .listening {
-                        ListeningView(manager: manager)
-                        .padding(.top, 6)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 12)
-                        .transition(.blurReplace(.downUp))
-                    }
-
-                    if showsResponseBubble {
-                        responseBubble
-                            .padding(.top, 8)
+                    .padding(.top, manager.notchSize.height + settings.contentPadding)
+                } else {
+                    // Classic layout: centered sprite + controls + response bubble.
+                    VStack(spacing: 0) {
+                        // Mini music strip when music is playing during assistant mode.
+                        if let np = manager.nowPlaying, np.isPlaying, np.hasTrack {
+                            MusicMiniStripView(nowPlaying: np) {
+                                manager.switchToMusicExtended()
+                            }
                             .padding(.horizontal, 16)
-                            .padding(.bottom, hasActions ? 2 : 6)
-                    }
+                            .padding(.bottom, 6)
+                            .transition(.blurReplace(.downUp))
+                        }
 
-                    actionCards
+                        manager.spriteImage
+                            .resizable()
+                            .interpolation(.none)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: settings.spriteSize)
+
+                        if manager.state == .expanded {
+                            ExpandedView(
+                                onTextTapped: { manager.transition(to: .typing) },
+                                onMicTapped: { manager.transition(to: .listening) }
+                            )
+                            .padding(.top, 12)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 16)
+                            .transition(.blurReplace(.downUp))
+                        }
+
+                        if manager.state == .typing {
+                            TypingView(manager: manager)
+                                .padding(.top, 8)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 12)
+                                .transition(.blurReplace(.downUp))
+                        }
+
+                        if manager.state == .listening {
+                            ListeningView(manager: manager)
+                            .padding(.top, 6)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                            .transition(.blurReplace(.downUp))
+                        }
+
+                        if showsResponseBubble {
+                            responseBubble
+                                .padding(.top, 8)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, hasActions ? 2 : 6)
+                        }
+
+                        actionCards
+                    }
+                    .padding(.top, manager.notchSize.height + settings.contentPadding + activeVerticalOffset(for: manager.state))
                 }
-                .padding(.top, manager.notchSize.height + settings.contentPadding + activeVerticalOffset(for: manager.state))
             }
 
             // ── Setup Wizard ──

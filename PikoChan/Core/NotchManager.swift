@@ -82,6 +82,26 @@ final class NotchManager {
 
     let actionHandler = PikoActionHandler()
 
+    // MARK: - Activity Feed
+
+    var feedItems: [PikoFeedItem] = []
+    var isFeedExpanded: Bool = false
+
+    /// Whether the feed has content worth showing.
+    var hasFeedContent: Bool {
+        !feedItems.isEmpty || isResponding
+    }
+
+    func addFeedItem(_ kind: PikoFeedKind) {
+        feedItems.append(PikoFeedItem(kind: kind))
+    }
+
+    func clearFeed() {
+        feedItems.removeAll()
+        isFeedExpanded = false
+        actionHandler.sessionAutoApprove = false
+    }
+
     // MARK: - Music
 
     var nowPlaying: PikoNowPlaying?
@@ -319,7 +339,9 @@ final class NotchManager {
         return notchSize.height + pad + 320
     }
 
-    var activeContentWidth: CGFloat { 290 }
+    var activeContentWidth: CGFloat {
+        hasFeedContent ? 360 : 290
+    }
 
     var showsResponseBubble: Bool {
         isResponding || !lastResponseText.isEmpty || lastResponseError != nil || showsChatHistory
@@ -330,15 +352,13 @@ final class NotchManager {
         guard !actions.isEmpty else { return 0 }
         var total: CGFloat = 0
         for action in actions {
-            // Base: command line + status line + padding = ~44pt
             var h: CGFloat = 44
-            // Add output block height for completed commands with output.
             if case .completed(let r) = action.status, !r.stdout.isEmpty || !r.stderr.isEmpty {
-                h += 60 // output block with 4 lines max
+                h += 60
             }
             total += h
         }
-        total += CGFloat(max(0, actions.count - 1)) * 4 // spacing
+        total += CGFloat(max(0, actions.count - 1)) * 4
         return total
     }
 
@@ -348,9 +368,31 @@ final class NotchManager {
         return base + actionBlockHeight
     }
 
+    /// Height of the feed block when feed is active.
+    private var feedBlockHeight: CGFloat {
+        guard hasFeedContent else { return 0 }
+        return isFeedExpanded ? 320 : 140
+    }
+
     var activeContentHeight: CGFloat {
         let pad = PikoSettings.shared.contentPadding
         let sprite = PikoSettings.shared.spriteSize
+
+        // When feed has content, use feed-based layout (sprite is beside feed, not above).
+        // Mini buttons are inside the feed area, so .expanded needs no extra control height.
+        if hasFeedContent {
+            let base = notchSize.height + pad + feedBlockHeight
+            switch state {
+            case .typing:
+                return base + 8 + 34 + 12    // gap + text field + bottom
+            case .listening:
+                return base + 6 + 80 + 12    // gap + wave/mic controls + bottom
+            default:
+                return base + 16              // just bottom breathing room
+            }
+        }
+
+        // Legacy layout: sprite above controls above response bubble.
         let expandedHeight = notchSize.height + pad + sprite + 12 + 36 + 16 + responseBlockHeight
         let typingHeight = notchSize.height + pad + sprite + 8 + 34 + 12 + responseBlockHeight
         let listeningHeight = notchSize.height + pad + sprite + 6 + 28 + 2 + 44 + 12 + responseBlockHeight
@@ -503,6 +545,7 @@ final class NotchManager {
         lastResponseText = ""
         isResponseExpanded = false
         showsChatHistory = false
+        addFeedItem(.userMessage(prompt))
         transition(to: .expanded)
 
         currentResponseTask = Task { [weak self] in
@@ -561,6 +604,16 @@ final class NotchManager {
                 let (cleanText, actions) = self.actionHandler.parseActions(from: self.lastResponseText)
                 self.lastResponseText = cleanText
 
+                // Add assistant message to feed (with action tags stripped).
+                if !cleanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.addFeedItem(.assistantMessage(cleanText))
+                }
+
+                // Add action references to feed.
+                for action in actions {
+                    self.addFeedItem(.actionRef(action.id))
+                }
+
                 if !actions.isEmpty {
                     // Lower panel so macOS permission dialogs (TCC) are clickable.
                     self.panel?.level = .floating
@@ -581,11 +634,18 @@ final class NotchManager {
                             let (parsedMood, summaryClean) = MoodParser.parse(from: summary)
                             if let parsedMood { self.currentMood = parsedMood }
                             self.lastResponseText = summaryClean
+                            self.addFeedItem(.assistantMessage(summaryClean))
                         }
                         self.isResponding = false
                         self.updateVisibleContentRect()
                     }
+                } else if cleanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && hasContent {
+                    // No actions and no clean text but had content — add raw response.
+                    self.addFeedItem(.assistantMessage(self.lastResponseText))
                 }
+            } else if hasContent {
+                // Response had content but lastResponseText ended up empty after mood parse.
+                // This shouldn't normally happen, but handle gracefully.
             }
 
             // Parse config commands + scheduled nudges from response.
@@ -671,16 +731,17 @@ final class NotchManager {
         }
     }
 
-    /// Execute a single user-confirmed action and re-query if it's a shell command.
+    /// Execute a single user-confirmed action and re-query LLM for a personalized response.
     func executeAndRequery(_ action: PikoAction) async {
         // Lower panel so macOS permission dialogs (TCC) are clickable.
         panel?.level = .floating
         await actionHandler.execute(action)
         panel?.level = .screenSaver
 
-        if case .shell = action.kind, actionHandler.hasCompletedShellActions {
+        // Re-query LLM with command results so PikoChan responds with personality.
+        if actionHandler.hasCompletedShellActions {
             isResponding = true
-            isResponseExpanded = false
+            lastResponseText = ""
             let requeryMsg = actionHandler.formatResultsForRequery()
             if let summary = try? await brain.respond(
                 to: requeryMsg,
@@ -691,10 +752,11 @@ final class NotchManager {
                 let (parsedMood, summaryClean) = MoodParser.parse(from: summary)
                 if let parsedMood { currentMood = parsedMood }
                 lastResponseText = summaryClean
+                addFeedItem(.assistantMessage(summaryClean))
             }
             isResponding = false
-            updateVisibleContentRect()
         }
+        updateVisibleContentRect()
     }
 
     func cancelResponse() {

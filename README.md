@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-000000?style=flat&logo=apple&logoColor=white" />
   <img src="https://img.shields.io/badge/swift-6.0-F05138?style=flat&logo=swift&logoColor=white" />
-  <img src="https://img.shields.io/badge/version-0.5.2--alpha-blue?style=flat" />
+  <img src="https://img.shields.io/badge/version-0.5.3--alpha-blue?style=flat" />
   <img src="https://img.shields.io/github/license/neur0map/PikoChan?style=flat" />
   <img src="https://img.shields.io/badge/LLM-local--first-brightgreen?style=flat" />
 </p>
@@ -50,9 +50,9 @@ Every AI assistant on the market follows the same formula: a chat window, a corp
 
 ---
 
-## Current State: v0.5.2-alpha
+## Current State: v0.5.3-alpha
 
-PikoChan has a brain, a soul, semantic memory, voice I/O, terminal control, browser automation, a skills system, and a now playing music widget — all inside the notch.
+PikoChan has a brain, a soul, semantic memory, voice I/O, terminal control, browser automation, a skills system, a now playing music widget, and an activity feed chat interface — all inside the notch.
 
 **Features:**
 
@@ -60,9 +60,10 @@ PikoChan has a brain, a soul, semantic memory, voice I/O, terminal control, brow
 - **Soul** — personality loaded from YAML, mood system with emotion tags driving sprite changes, soul evolution from behavioral feedback
 - **Memory** — semantic recall via Snowflake Arctic Embed XS (CoreML, 384-dim), SQLite storage, automatic fact extraction from conversations
 - **Voice** — push-to-talk STT (Groq/OpenAI/Deepgram Whisper), mood-aware TTS (OpenAI/ElevenLabs/Fish/Cartesia/fal.ai)
-- **Hands** — terminal commands via `[shell:CMD]`, browser automation via `[open:URL]`, safe-list/block-list controls, action result re-querying
+- **Hands** — terminal commands via `[shell:CMD]`, browser automation via `[open:URL]`, three-tier approval (Deny/Allow/Always), session-wide auto-approve, action result re-querying with personality
 - **Skills** — Markdown files in `~/.pikochan/skills/` with YAML frontmatter teach PikoChan new abilities
 - **Music** — system-wide Now Playing detection (MediaRemote + CoreAudio + browser titles), iTunes Search API album art, playback controls for native apps and browsers
+- **Chat** — activity feed with iMessage-style blue bubbles, sprite-left layout, streaming dots, collapsible command output, full-width tap targets, new chat via sprite tap
 - **Awareness** — background heartbeat monitoring frontmost app, idle time, time-of-day. Proactive nudges
 - **Setup** — in-notch first-time wizard with provider validation, embedding checks, and system diagnostics
 
