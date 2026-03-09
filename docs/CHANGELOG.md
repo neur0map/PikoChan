@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.5.3-alpha — Activity Feed & Chat Redesign
+
+PikoChan gets a proper chat interface with an activity feed inside the notch.
+
+- **Activity feed**: scrollable conversation view replacing the single response bubble. Messages, commands, and responses live in a unified timeline
+- **iMessage-style bubbles**: assistant responses in blue rounded bubbles (left-aligned), user messages in gray bubbles (right-aligned). Streaming responses show animated thinking dots
+- **Command approval redesign**: three-tier approval — Deny, Allow (once), Always (session-wide auto-approve). Full command text visible before approval, auto-expanded for review
+- **Collapsible command output**: output hidden by default behind "Output (N lines)" toggle. Full-width tap targets — tap anywhere on the row, not just the tiny chevron
+- **Sprite-left layout**: PikoChan sprite pinned left with mini keyboard/mic buttons underneath. Tap sprite to start a new chat (clears feed, resets session approval)
+- **Wider notch**: feed layout expands to 360px (up from 290px) for more readable text
+- **Scroll improvements**: `defaultScrollAnchor(.bottom)` for smooth bottom-pinned scrolling, no more janky animated scroll snapping
+- **Feed data model**: `PikoFeedItem` with `PikoFeedKind` enum (userMessage, assistantMessage, actionRef). Actions referenced by UUID to avoid sync issues
+- **Markdown stripping**: `**bold**` markers stripped from LLM responses for clean plain-text display
+- **Re-query with personality**: after command execution, LLM re-queries with results and responds in character with mood
+
 ## v0.5.2-alpha — Now Playing Music Widget
 
 PikoChan detects and controls music playing on your Mac.
