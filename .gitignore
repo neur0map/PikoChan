@@ -19,5 +19,5 @@ xcuserdata/
 .env
 *.pem
 
-# Local docs
-docs/
+# Local design docs (plans are internal)
+docs/plans/
