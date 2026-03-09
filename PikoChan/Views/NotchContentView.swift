@@ -12,6 +12,8 @@ struct NotchContentView: View {
         switch manager.state {
         case .hidden:    6
         case .hovered:   8
+        case .musicCompact, .musicHover: 0
+        case .musicExtended: 15
         case .expanded, .typing, .listening, .setup: 15
         }
     }
@@ -20,6 +22,8 @@ struct NotchContentView: View {
         switch manager.state {
         case .hidden:    10
         case .hovered:   12
+        case .musicCompact, .musicHover: 12
+        case .musicExtended: 24
         case .expanded, .typing, .listening, .setup: 24
         }
     }
@@ -28,6 +32,10 @@ struct NotchContentView: View {
         switch manager.state {
         case .hidden:    manager.notchSize.width
         case .hovered:   manager.notchSize.width
+        case .musicCompact, .musicHover:
+            manager.musicCompactWidth
+        case .musicExtended:
+            manager.musicExtendedWidth
         case .expanded, .typing, .listening, .setup:
             manager.activeContentWidth
         }
@@ -38,11 +46,20 @@ struct NotchContentView: View {
         return switch manager.state {
         case .hidden:    manager.notchSize.height
         case .hovered:   manager.notchSize.height + pad + 12
+        case .musicCompact, .musicHover:
+            manager.musicCompactHeight
+        case .musicExtended:
+            manager.musicExtendedHeight
         case .expanded, .typing, .listening:
             manager.activeContentHeight
         case .setup:
             manager.setupContentHeight
         }
+    }
+
+    /// Animate compact size changes when hovering album art.
+    private var compactAnimation: Animation {
+        .spring(response: 0.3, dampingFraction: 0.8)
     }
 
     private var shadowOpacity: Double {
@@ -120,15 +137,56 @@ struct NotchContentView: View {
     private var notchBody: some View {
         ZStack(alignment: .top) {
             // ── Background ──
-            if settings.backgroundStyle == .translucent {
+            // Music states MUST be pitch black to blend with the hardware notch.
+            if settings.backgroundStyle == .translucent && !manager.state.isMusic {
                 VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
             } else {
                 Color.black
             }
 
+            // ── Music Compact (with hover for track name) ──
+            if (manager.state == .musicCompact || manager.state == .musicHover), let np = manager.nowPlaying {
+                MusicCompactView(nowPlaying: np, manager: manager)
+                    .padding(.top, manager.notchSize.height - 26)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            manager.isHoveringMusicArt = hovering
+                        }
+                    }
+                    .transition(.opacity)
+            }
+
+            // ── Music Extended ──
+            if manager.state == .musicExtended, let np = manager.nowPlaying {
+                MusicExtendedView(
+                    nowPlaying: np,
+                    spriteImage: manager.spriteImage,
+                    onSpriteTapped: { manager.switchToAssistant() }
+                )
+                .padding(.top, manager.notchSize.height + settings.contentPadding)
+                .transition(
+                    .asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .top)),
+                        removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+                    )
+                )
+            }
+
             // ── Foreground Content ──
             if manager.state == .expanded || manager.state == .typing || manager.state == .listening {
                 VStack(spacing: 0) {
+                    // Mini music strip when music is playing during assistant mode.
+                    if let np = manager.nowPlaying, np.isPlaying, np.hasTrack {
+                        MusicMiniStripView(nowPlaying: np) {
+                            manager.switchToMusicExtended()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 6)
+                        .transition(.opacity.combined(with: .offset(y: -4)))
+                    }
+
                     manager.spriteImage
                         .resizable()
                         .interpolation(.none)
@@ -215,9 +273,14 @@ struct NotchContentView: View {
         }
         // Fixed frame — never animated on content changes to avoid
         // constraint loops in NSHostingView (FB16484811-adjacent).
+        // Exception: compact music hover animates size smoothly.
         .frame(width: contentWidth, height: contentHeight)
         .clipShape(NotchShape(topCornerRadius: topRadius, bottomCornerRadius: bottomRadius))
         .shadow(color: .black.opacity(shadowOpacity), radius: 20, y: 10)
+        .animation(
+            (manager.state == .musicCompact || manager.state == .musicHover) ? compactAnimation : nil,
+            value: manager.isHoveringMusicArt
+        )
         .onHover { hovering in
             if hovering && manager.state == .hidden {
                 manager.transition(to: .hovered)

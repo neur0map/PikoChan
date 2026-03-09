@@ -30,7 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.stt = PikoSTT()
         manager.tts = PikoTTS()
 
+        // Now Playing — system-wide music detection.
+        let nowPlaying = PikoNowPlaying()
+        manager.nowPlaying = nowPlaying
+
         manager.start()
+        manager.startMusicObservation()
         notchManager = manager
 
         // HTTP gateway — shares the same brain as the notch UI.

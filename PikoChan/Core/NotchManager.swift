@@ -82,6 +82,11 @@ final class NotchManager {
 
     let actionHandler = PikoActionHandler()
 
+    // MARK: - Music
+
+    var nowPlaying: PikoNowPlaying?
+    private var musicObservationTask: Task<Void, Never>?
+
     init(brain: PikoBrain) {
         self.brain = brain
     }
@@ -100,6 +105,7 @@ final class NotchManager {
     private var moodDecayTask: Task<Void, Never>?
     private var hoverPollTimer: Timer?
     private let menuTarget = ContextMenuTarget()
+    private var suppressNextGlobalClick = false
 
     // MARK: - Geometry
 
@@ -141,9 +147,61 @@ final class NotchManager {
         currentResponseTask = nil
         moodDecayTask?.cancel()
         moodDecayTask = nil
+        musicObservationTask?.cancel()
+        musicObservationTask = nil
+        nowPlaying?.stopListening()
         removeMonitors()
         panel?.orderOut(nil)
         panel = nil
+    }
+
+    // MARK: - Music Observation
+
+    func startMusicObservation() {
+        guard let np = nowPlaying else { return }
+        np.startListening()
+
+        // Poll for changes since @Observable withObservationTracking
+        // can't drive state transitions from a non-view context easily.
+        musicObservationTask = Task { [weak self] in
+            var wasPlaying = false
+            var stoppedAt: ContinuousClock.Instant?
+            let gracePeriod: Duration = .seconds(5)
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard let self, !Task.isCancelled else { break }
+                let playing = np.isPlaying && np.hasTrack
+
+                if playing && !wasPlaying {
+                    stoppedAt = nil
+                    // Music started — show compact if idle.
+                    if self.state == .hidden || self.state == .hovered {
+                        self.transition(to: .musicCompact)
+                    }
+                } else if !playing && wasPlaying {
+                    // Music stopped — start grace period.
+                    stoppedAt = .now
+                } else if !playing, let stopped = stoppedAt {
+                    // Still stopped — collapse after grace period.
+                    if ContinuousClock.now - stopped > gracePeriod, self.state.isMusic {
+                        self.transition(to: .hidden)
+                        stoppedAt = nil
+                    }
+                }
+                wasPlaying = playing
+            }
+        }
+    }
+
+    /// Switch from music extended to assistant mode.
+    func switchToAssistant() {
+        transition(to: .expanded)
+    }
+
+    /// Switch from assistant back to music extended.
+    func switchToMusicExtended() {
+        transition(to: .musicExtended)
     }
 
     // MARK: - Panel Setup
@@ -212,6 +270,10 @@ final class NotchManager {
         switch state {
         case .hidden:    notchSize.width
         case .hovered:   notchSize.width
+        case .musicCompact, .musicHover:
+            musicCompactWidth
+        case .musicExtended:
+            musicExtendedWidth
         case .expanded, .typing, .listening, .setup:
             activeContentWidth
         }
@@ -222,12 +284,35 @@ final class NotchManager {
         return switch state {
         case .hidden:    notchSize.height
         case .hovered:   notchSize.height + pad + 12
+        case .musicCompact, .musicHover:
+            musicCompactHeight
+        case .musicExtended:
+            musicExtendedHeight
         case .expanded, .typing, .listening:
             activeContentHeight
         case .setup:
             setupContentHeight
         }
     }
+
+    // MARK: - Music Geometry
+
+    /// Whether the user is hovering over the compact music pill.
+    var isHoveringMusicArt: Bool = false {
+        didSet { updateVisibleContentRect() }
+    }
+
+    /// Compact pill stretches beyond notch to fit art + bars.
+    var musicCompactWidth: CGFloat {
+        isHoveringMusicArt ? notchSize.width + 140 : notchSize.width + 100
+    }
+    var musicCompactHeight: CGFloat {
+        isHoveringMusicArt ? notchSize.height + 34 : notchSize.height
+    }
+
+    /// Extended mini-player.
+    var musicExtendedWidth: CGFloat { 340 }
+    var musicExtendedHeight: CGFloat { notchSize.height + PikoSettings.shared.contentPadding + 100 }
 
     var setupContentHeight: CGFloat {
         let pad = PikoSettings.shared.contentPadding
@@ -282,8 +367,13 @@ final class NotchManager {
             setupManager = nil
         }
 
-        // Remember what the user was doing before hiding (but not .setup).
-        if newState == .hidden && state != .hovered && state != .setup {
+        // Reset music art hover when leaving compact.
+        if state.isMusic && !newState.isMusic {
+            isHoveringMusicArt = false
+        }
+
+        // Remember what the user was doing before hiding (but not .setup or music states).
+        if newState == .hidden && state != .hovered && state != .setup && !state.isMusic {
             lastActiveState = state
         }
 
@@ -292,6 +382,12 @@ final class NotchManager {
             .smooth(duration: 0.25)
         case .hovered:
             .spring(response: 0.35, dampingFraction: 0.75, blendDuration: 0.15)
+        case .musicCompact:
+            .spring(response: 0.5, dampingFraction: 0.7, blendDuration: 0.2)
+        case .musicHover:
+            .spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0.1)
+        case .musicExtended:
+            .spring(response: 0.45, dampingFraction: 0.72, blendDuration: 0.2)
         case .expanded:
             .spring(response: 0.45, dampingFraction: 0.72, blendDuration: 0.2)
         case .typing:
@@ -322,6 +418,19 @@ final class NotchManager {
             panel?.ignoresMouseEvents = false
             panel?.styleMask.insert(.nonactivatingPanel)
             panel?.syncActivationState()
+
+        case .musicCompact, .musicHover:
+            // Music compact/hover: receive events but don't activate.
+            panel?.ignoresMouseEvents = false
+            panel?.styleMask.insert(.nonactivatingPanel)
+            panel?.syncActivationState()
+
+        case .musicExtended:
+            // Extended music needs interaction for playback controls.
+            panel?.ignoresMouseEvents = false
+            panel?.styleMask.insert(.nonactivatingPanel)
+            panel?.syncActivationState()
+            panel?.makeKey()
 
         case .expanded:
             panel?.ignoresMouseEvents = false
@@ -856,7 +965,7 @@ final class NotchManager {
 
         // ── Click ──
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
-            guard let self else { return }
+            guard let self, !self.suppressNextGlobalClick else { return }
             let mouse = NSEvent.mouseLocation
             switch self.state {
             case .hidden, .hovered:
@@ -864,13 +973,31 @@ final class NotchManager {
                 if NSMouseInRect(mouse, self.hoverZone, false) {
                     self.reopen()
                 }
+            case .musicCompact, .musicHover:
+                // Click on compact music → extend.
+                if let panel = self.panel, panel.isMouseOverContent(mouse) {
+                    self.transition(to: .musicExtended)
+                }
+            case .musicExtended:
+                // Click outside → collapse to compact. Clicks on content are handled by buttons.
+                if let panel = self.panel, !panel.isMouseOverContent(mouse) {
+                    if self.nowPlaying?.isPlaying == true {
+                        self.transition(to: .musicCompact)
+                    } else {
+                        self.transition(to: .hidden)
+                    }
+                }
             case .setup:
                 // Don't dismiss setup on outside click.
                 break
             case .expanded, .typing, .listening:
                 // Click outside visible content → hide (but preserve state).
                 if let panel = self.panel, !panel.isMouseOverContent(mouse) {
-                    self.transition(to: .hidden)
+                    if self.nowPlaying?.isPlaying == true {
+                        self.transition(to: .musicCompact)
+                    } else {
+                        self.transition(to: .hidden)
+                    }
                 }
             }
         }
@@ -878,6 +1005,12 @@ final class NotchManager {
             guard let self else { return event }
             if self.state == .hovered {
                 self.reopen()
+            } else if self.state == .musicCompact || self.state == .musicHover {
+                self.transition(to: .musicExtended)
+            } else if self.state == .musicExtended {
+                // Mark that a local click is in-flight so the global handler ignores it.
+                self.suppressNextGlobalClick = true
+                DispatchQueue.main.async { self.suppressNextGlobalClick = false }
             }
             return event
         }
@@ -907,6 +1040,16 @@ final class NotchManager {
             case .setup:
                 // Don't dismiss setup on escape.
                 return nil
+            case .musicExtended:
+                if self.nowPlaying?.isPlaying == true {
+                    self.transition(to: .musicCompact)
+                } else {
+                    self.transition(to: .hidden)
+                }
+                return nil
+            case .musicCompact, .musicHover:
+                self.transition(to: .hidden)
+                return nil
             case .typing:
                 self.transition(to: .expanded)
                 return nil
@@ -919,7 +1062,11 @@ final class NotchManager {
                 self.transition(to: .expanded)
                 return nil
             case .expanded, .hovered:
-                self.transition(to: .hidden)
+                if self.nowPlaying?.isPlaying == true {
+                    self.transition(to: .musicCompact)
+                } else {
+                    self.transition(to: .hidden)
+                }
                 return nil
             default:
                 return event
@@ -991,6 +1138,25 @@ final class NotchManager {
                 transition(to: .hidden)
             }
             // Pass through clicks outside the visible notch content.
+            if let panel {
+                let overContent = panel.isMouseOverContent(mouse)
+                if panel.ignoresMouseEvents == overContent {
+                    panel.ignoresMouseEvents = !overContent
+                }
+            }
+
+        case .musicCompact, .musicHover:
+            // Generous hit zone prevents hover flicker at edges.
+            if let panel {
+                let rect = panel.visibleContentScreenRect.insetBy(dx: -20, dy: -20)
+                let over = rect.contains(mouse)
+                if panel.ignoresMouseEvents == over {
+                    panel.ignoresMouseEvents = !over
+                }
+            }
+
+        case .musicExtended:
+            // Dynamically toggle mouse passthrough.
             if let panel {
                 let overContent = panel.isMouseOverContent(mouse)
                 if panel.ignoresMouseEvents == overContent {
@@ -1116,7 +1282,7 @@ final class NotchManager {
 
         // Restore to match current state (menu actions like "Open Settings"
         // may have triggered a state transition while the menu was open).
-        let shouldIgnore = (state == .hidden || state == .hovered)
+        let shouldIgnore = (state == .hidden)
         panel.ignoresMouseEvents = shouldIgnore
     }
 
