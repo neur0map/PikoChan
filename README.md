@@ -42,6 +42,7 @@ Every AI assistant on the market follows the same formula: a chat window, a corp
 
 ### Inspirations
 
+- **[NotchNook](https://lo.cafe/notchnook)** — The gold standard for notch-based macOS UI. Proved the notch can be a full interaction surface with widgets, shelves, and live actions. PikoChan's notch interaction patterns (compact → hover → expanded) are directly inspired by NotchNook's polish
 - **[Project Airi](https://github.com/moeru-ai/airi)** — Soul container architecture, personality as composable middleware, memory with emotional scoring
 - **[OpenClaw](https://github.com/nicepkg/OpenClaw)** — Terminal control, browser automation, heartbeat monitoring, skills as Markdown files
 - **[Neuro-sama](https://www.twitch.tv/vedal987)** — Proof that an AI character with genuine personality can be more compelling than one that's merely helpful
