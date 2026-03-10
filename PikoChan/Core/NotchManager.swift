@@ -71,6 +71,8 @@ final class NotchManager {
     var heartbeat: PikoHeartbeat?
     /// Set by AppDelegate after cron service is created, so cron commands work from chat.
     var cronService: PikoCronService?
+    /// Set by AppDelegate — MCP tool server manager.
+    var mcpManager: PikoMCPManager?
 
     // MARK: - Voice
 
@@ -683,6 +685,13 @@ final class NotchManager {
                     self.cronService?.handleCommands(cronParsed.commands)
                 }
 
+                // Parse MCP commands from response.
+                let mcpParsed = PikoMCPCommand.parse(from: self.lastResponseText)
+                self.lastResponseText = mcpParsed.cleanText
+                if !mcpParsed.commands.isEmpty {
+                    await self.handleMCPCommands(mcpParsed.commands)
+                }
+
                 // Auto-speak response if voice TTS is enabled.
                 self.speakIfEnabled(self.lastResponseText)
             }
@@ -696,6 +705,80 @@ final class NotchManager {
                 self.isResponding = false
             }
             self.currentResponseTask = nil
+        }
+    }
+
+    // MARK: - MCP Command Handling
+
+    private func handleMCPCommands(_ commands: [PikoMCPCommand.Command]) async {
+        guard let mcpManager else { return }
+
+        var toolResults: [(server: String, tool: String, result: PikoMCPToolResult)] = []
+
+        for command in commands {
+            switch command {
+            case .install(let config):
+                self.addFeedItem(.assistantMessage("Installing MCP server: \(config.name)..."))
+                do {
+                    try await mcpManager.installServer(config, brain: self.brain)
+                    let toolCount = mcpManager.toolCountForServer(name: config.name)
+                    self.addFeedItem(.assistantMessage("\(config.name) installed with \(toolCount) tools."))
+                } catch {
+                    self.addFeedItem(.assistantMessage("Failed to install \(config.name): \(error.localizedDescription)"))
+                }
+
+            case .toolCall(let serverName, let toolName, let arguments):
+                do {
+                    let result = try await mcpManager.callTool(
+                        serverName: serverName,
+                        toolName: toolName,
+                        arguments: arguments
+                    )
+                    toolResults.append((serverName, toolName, result))
+                } catch {
+                    toolResults.append((serverName, toolName, PikoMCPToolResult(
+                        content: "Error: \(error.localizedDescription)",
+                        isError: true
+                    )))
+                }
+
+            case .remove(let serverName):
+                mcpManager.removeServer(name: serverName)
+                self.addFeedItem(.assistantMessage("Removed MCP server: \(serverName)"))
+
+            case .list:
+                let list = mcpManager.servers.map { s -> String in
+                    let status = mcpManager.statusForServer(name: s.name)
+                    let tools = mcpManager.toolCountForServer(name: s.name)
+                    return "- \(s.name): \(status.label) (\(tools) tools)"
+                }
+                let msg = list.isEmpty ? "No MCP servers installed." : list.joined(separator: "\n")
+                self.addFeedItem(.assistantMessage(msg))
+            }
+        }
+
+        // Re-query LLM with tool results for summary.
+        if !toolResults.isEmpty {
+            self.isResponding = true
+            self.isResponseExpanded = false
+            let resultBlock = toolResults.map { r in
+                "[\(r.server).\(r.tool)] \(r.result.isError ? "ERROR: " : "")\(String(r.result.content.prefix(2000)))"
+            }.joined(separator: "\n\n")
+
+            let requeryMsg = "Here are the MCP tool results:\n\n\(resultBlock)\n\nSummarize these results for the user concisely."
+            if let summary = try? await self.brain.respond(
+                to: requeryMsg,
+                mood: self.currentMood,
+                skipMemoryExtraction: true,
+                skipHistory: true
+            ) {
+                let (parsedMood, summaryClean) = MoodParser.parse(from: summary)
+                if let parsedMood { self.currentMood = parsedMood }
+                self.lastResponseText = summaryClean
+                self.addFeedItem(.assistantMessage(summaryClean))
+            }
+            self.isResponding = false
+            self.updateVisibleContentRect()
         }
     }
 

@@ -20,6 +20,8 @@ final class PikoHTTPServer {
     var heartbeat: PikoHeartbeat?
     /// Set by AppDelegate so cron commands work via HTTP.
     var cronService: PikoCronService?
+    /// Set by AppDelegate so MCP commands work via HTTP.
+    var mcpManager: PikoMCPManager?
 
     init(brain: PikoBrain, port: UInt16, moodSetter: ((NotchManager.Mood) -> Void)? = nil) {
         self.brain = brain
@@ -232,6 +234,8 @@ final class PikoHTTPServer {
             handleConfig(connection: connection)
         case ("POST", "/mood"):
             handleSetMood(body: body, connection: connection)
+        case ("GET", "/mcp"):
+            handleMCPList(connection: connection)
         case ("GET", "/cron"):
             handleCronList(connection: connection)
         case ("POST", "/cron"):
@@ -324,6 +328,10 @@ final class PikoHTTPServer {
             if !cronParsed.commands.isEmpty {
                 self.cronService?.handleCommands(cronParsed.commands)
             }
+
+            // Parse MCP commands.
+            let mcpParsed = PikoMCPCommand.parse(from: fullResponse)
+            fullResponse = mcpParsed.cleanText
         }
 
         let json: [String: Any] = [
@@ -399,6 +407,10 @@ final class PikoHTTPServer {
             if !cronParsed.commands.isEmpty {
                 self.cronService?.handleCommands(cronParsed.commands)
             }
+
+            // Parse MCP commands.
+            let mcpParsed = PikoMCPCommand.parse(from: fullResponse)
+            fullResponse = mcpParsed.cleanText
         }
 
         // Final done event.
@@ -614,6 +626,31 @@ final class PikoHTTPServer {
         default:
             sendJSON(connection: connection, status: 404, json: ["error": "Not found"])
         }
+    }
+
+    // MARK: - MCP Handler
+
+    private func handleMCPList(connection: NWConnection) {
+        guard let mcpManager else {
+            sendJSON(connection: connection, status: 503, json: ["error": "MCP manager not available"])
+            return
+        }
+        let servers: [[String: Any]] = mcpManager.servers.map { server in
+            let status = mcpManager.statusForServer(name: server.name)
+            let tools = mcpManager.transports[server.name]?.tools.map { t in
+                ["name": t.name, "description": t.description]
+            } ?? []
+            return [
+                "name": server.name,
+                "command": server.command,
+                "args": server.args,
+                "enabled": server.enabled,
+                "status": status.label,
+                "tool_count": mcpManager.toolCountForServer(name: server.name),
+                "tools": tools,
+            ] as [String: Any]
+        }
+        sendJSON(connection: connection, status: 200, json: ["servers": servers, "count": servers.count])
     }
 
     // MARK: - Response Helpers

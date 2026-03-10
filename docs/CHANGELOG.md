@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.5.6-alpha — MCP Client
+
+PikoChan can install, discover, and use external MCP (Model Context Protocol) tool servers.
+
+- **MCP client**: paste any MCP server config (JSON, YAML, npm command, or plain English) into chat — PikoChan extracts the config, installs the server, discovers tools, and auto-generates usage instructions
+- **JSON-RPC 2.0 stdio transport**: `PikoMCPTransport` spawns MCP server processes with stdin/stdout JSON-RPC, protocol handshake (`initialize` → `initialized` → `tools/list`), crash detection, and stderr buffering
+- **Auto-skill generation**: on install, internal LLM call generates a skill `.md` file at `~/.pikochan/mcp/skills/` with tool descriptions and example tags — automatically loaded into the system prompt
+- **Tag format**: `[mcp:install:{JSON}]` to install, `[mcp:server.tool:{JSON}]` to call tools, `[mcp:remove:name]` to uninstall, `[mcp:list]` to show servers
+- **Keychain secrets**: env vars containing KEY, SECRET, TOKEN, or PASSWORD are stored in macOS Keychain instead of plaintext YAML. Servers like Brave Search and Firecrawl work securely with API keys
+- **Tool result re-query**: after MCP tool calls complete, results are sent back to the LLM for a concise summary in PikoChan's voice
+- **System prompt injection**: `<mcp_tools>` XML block with tool schemas injected into system prompt (1000 char cap per server)
+- **HTTP API**: `GET /mcp` returns server list with status and discovered tools
+- **Settings tab**: MCP Tools tab with server status dots (green/red/gray), tool counts, start/stop/remove buttons
+- **Gateway logging**: 8 new MCP event types under `.mcp` subsystem (serverStart/Ready/Error/Stop, toolCall/Result, install, remove)
+
 ## v0.5.5-alpha — Cron Scheduler
 
 Persistent, recurring scheduled jobs with full cron expression support.

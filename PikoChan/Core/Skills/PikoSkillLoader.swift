@@ -26,6 +26,8 @@ final class PikoSkillLoader {
         skills.append(contentsOf: scanDirectory(home.skillsDir, builtIn: true))
         // Custom skills from ~/.pikochan/skills/custom/
         skills.append(contentsOf: scanDirectory(home.customSkillsDir, builtIn: false))
+        // MCP auto-generated skills from ~/.pikochan/mcp/skills/
+        skills.append(contentsOf: scanDirectory(home.mcpSkillsDir, builtIn: false))
 
         loadedSkills = skills
         PikoGateway.shared.logSkillsReload(count: skills.count)

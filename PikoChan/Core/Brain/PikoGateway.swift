@@ -79,6 +79,14 @@ final class PikoGateway {
         case cronPause = "cron_pause"
         case cronResume = "cron_resume"
         case cronDisabled = "cron_disabled"
+        case mcpServerStart = "mcp_server_start"
+        case mcpServerReady = "mcp_server_ready"
+        case mcpServerError = "mcp_server_error"
+        case mcpServerStop = "mcp_server_stop"
+        case mcpToolCall = "mcp_tool_call"
+        case mcpToolResult = "mcp_tool_result"
+        case mcpInstall = "mcp_install"
+        case mcpRemove = "mcp_remove"
     }
 
     enum Subsystem: String, Encodable {
@@ -93,6 +101,7 @@ final class PikoGateway {
         case voice
         case skills
         case cron
+        case mcp
     }
 
     // MARK: - Log Events
@@ -449,6 +458,60 @@ final class PikoGateway {
             "name": name,
             "reason": reason,
         ])
+    }
+
+    // MARK: - MCP Events
+
+    func logMCPServerStart(name: String, command: String) {
+        log(type: .mcpServerStart, subsystem: .mcp, data: [
+            "name": name,
+            "command": command,
+        ])
+    }
+
+    func logMCPServerReady(name: String, toolCount: Int) {
+        log(type: .mcpServerReady, subsystem: .mcp, data: [
+            "name": name,
+            "tool_count": String(toolCount),
+        ])
+    }
+
+    func logMCPServerError(name: String, error: String) {
+        log(type: .mcpServerError, subsystem: .mcp, data: [
+            "name": name,
+            "error": truncate(error, max: 500),
+        ])
+    }
+
+    func logMCPServerStop(name: String) {
+        log(type: .mcpServerStop, subsystem: .mcp, data: ["name": name])
+    }
+
+    func logMCPToolCall(server: String, tool: String) {
+        log(type: .mcpToolCall, subsystem: .mcp, data: [
+            "server": server,
+            "tool": tool,
+        ])
+    }
+
+    func logMCPToolResult(server: String, tool: String, durationMs: Int, isError: Bool) {
+        log(type: .mcpToolResult, subsystem: .mcp, data: [
+            "server": server,
+            "tool": tool,
+            "duration_ms": String(durationMs),
+            "is_error": String(isError),
+        ])
+    }
+
+    func logMCPInstall(name: String, toolCount: Int) {
+        log(type: .mcpInstall, subsystem: .mcp, data: [
+            "name": name,
+            "tool_count": String(toolCount),
+        ])
+    }
+
+    func logMCPRemove(name: String) {
+        log(type: .mcpRemove, subsystem: .mcp, data: ["name": name])
     }
 
     // MARK: - Log Reading

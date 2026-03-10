@@ -32,10 +32,11 @@ struct PikoHome {
     var configFileExists: Bool { FileManager.default.fileExists(atPath: configFile.path) }
     var memoryDBFile: URL { memoryDir.appendingPathComponent("pikochan.db") }
     var journalFile: URL { memoryDir.appendingPathComponent("journal.md") }
+    var mcpSkillsDir: URL { mcpDir.appendingPathComponent("skills", isDirectory: true) }
     var mcpServersFile: URL { mcpDir.appendingPathComponent("servers.yaml") }
 
     func bootstrap(fileManager: FileManager = .default) throws {
-        let dirs = [root, soulDir, skillsDir, customSkillsDir, memoryDir, mcpDir, modelsDir, logsDir, voiceDir, voiceModelsDir, cronDir, cronRunsDir]
+        let dirs = [root, soulDir, skillsDir, customSkillsDir, memoryDir, mcpDir, mcpSkillsDir, modelsDir, logsDir, voiceDir, voiceModelsDir, cronDir, cronRunsDir]
         for dir in dirs {
             try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         }

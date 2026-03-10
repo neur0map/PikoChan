@@ -72,6 +72,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.cronService = cron
         server.cronService = cron
 
+        // MCP client — external tool servers.
+        PikoMCPManager.shared.loadServers()
+        manager.mcpManager = PikoMCPManager.shared
+        server.mcpManager = PikoMCPManager.shared
+
         // Auto-start local TTS server if configured.
         let voiceConfig = PikoVoiceConfigStore.shared.currentConfig
         if voiceConfig.ttsProvider == .local && !voiceConfig.localModelPath.isEmpty {
@@ -80,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        PikoMCPManager.shared.stopAll()
         cronService?.stop()
         PikoVoiceServer.shared.stop()
         heartbeat?.stop()

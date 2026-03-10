@@ -33,6 +33,7 @@ final class SettingsWindowController {
             ("Voice",      "waveform.circle",                   NSHostingView(rootView: VoiceTab())),
             ("Skills",     "hammer",                            NSHostingView(rootView: SkillsTab())),
             ("Cron",       "clock",                             NSHostingView(rootView: CronTab())),
+            ("MCP Tools",  "puzzlepiece",                       NSHostingView(rootView: MCPTab())),
             ("Awareness", "heart.text.square",                 NSHostingView(rootView: AwarenessTab())),
             ("Behavior",   "gearshape",                        NSHostingView(rootView: BehaviorTab())),
             ("Notch",      "rectangle.topthird.inset.filled",  NSHostingView(rootView: NotchTuneTab())),

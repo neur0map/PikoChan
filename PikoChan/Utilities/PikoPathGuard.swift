@@ -215,5 +215,13 @@ enum PikoPathGuard {
     [cron:add:morning-pull:cron:0 9 * * *:shell:cd ~/project && git pull] — git pull daily at 9am. \
     [cron:add:standup:every:1d:open:https://meet.google.com/xyz] — open standup link daily. \
     Jobs persist in ~/.pikochan/cron/jobs.json. 3 consecutive failures auto-disable the job.
+
+    MCP TOOLS: You can install external MCP (Model Context Protocol) tool servers! \
+    When a user pastes an MCP server config in ANY format (JSON, YAML, npm command, etc.), \
+    extract name/command/args/env and emit an install tag: \
+    [mcp:install:{"name":"server-name","command":"npx","args":["-y","@pkg/name"],"env":{}}] \
+    To call a discovered tool: [mcp:server_name.tool_name:{"param":"value"}] \
+    To remove a server: [mcp:remove:server_name] To list servers: [mcp:list] \
+    MCP servers and auto-generated skills are stored in ~/.pikochan/mcp/.
     """
 }
