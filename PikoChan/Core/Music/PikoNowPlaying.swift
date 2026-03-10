@@ -41,6 +41,10 @@ final class PikoNowPlaying {
     /// When the user taps play/pause, suppress poll overrides briefly.
     private var userControlUntil: ContinuousClock.Instant = .now
 
+    /// Set to true after AppleScript returns error -1743 (not authorized).
+    /// Prevents spamming the console every 2 seconds.
+    private var spotifyScriptDenied: Bool = false
+
     /// Known browser bundle IDs for window title fallback.
     private static let browserBundleIDs: Set<String> = [
         "ai.perplexity.comet",
@@ -52,6 +56,14 @@ final class PikoNowPlaying {
         "company.thebrowser.Browser",  // Arc
         "app.zen-browser.zen",
         "com.nickvision.application",  // Parabolic etc.
+    ]
+
+    /// Native music apps — detected via AX window title when MR fails.
+    private static let musicAppBundleIDs: Set<String> = [
+        "com.spotify.client",
+        "com.apple.Music",
+        "com.tidal.desktop",
+        "com.amazon.music",
     ]
 
     /// YouTube title pattern: "Track - Artist - YouTube"
@@ -214,33 +226,185 @@ final class PikoNowPlaying {
     // MARK: - Fallback Poll (CoreAudio + Window Title)
 
     private func pollFallback() {
-        let audioRunning = Self.isAudioDeviceRunning()
+        // Try native music apps first (AppleScript reports its own play state,
+        // so this works even if CoreAudio doesn't report active audio).
+        if detectFromMusicApps() { return }
 
-        if audioRunning {
-            if hasMediaRemoteSession {
-                // MR was working last time — check if it still has data.
-                bridge.getNowPlayingInfo { [weak self] info in
-                    guard let self else { return }
-                    let mrTitle = info[MediaRemoteBridge.titleKey] as? String ?? ""
-                    if mrTitle.isEmpty {
-                        self.hasMediaRemoteSession = false
-                        self.detectFromBrowserWindows()
+        // Try browser windows directly — CoreAudio isAudioDeviceRunning() is
+        // unreliable on macOS 26 and would gate this check incorrectly.
+        if hasMediaRemoteSession {
+            bridge.getNowPlayingInfo { [weak self] info in
+                guard let self else { return }
+                let mrTitle = info[MediaRemoteBridge.titleKey] as? String ?? ""
+                if mrTitle.isEmpty {
+                    self.hasMediaRemoteSession = false
+                    if !self.detectFromBrowserWindows() {
+                        self.markStoppedIfIdle()
                     }
                 }
-            } else {
-                // No MR session — go straight to browser detection (no MR calls).
-                detectFromBrowserWindows()
             }
         } else {
-            // No audio — mark stopped (respect user cooldown).
-            if isPlaying && !hasMediaRemoteSession && ContinuousClock.now > userControlUntil {
-                isPlaying = false
+            if !detectFromBrowserWindows() {
+                markStoppedIfIdle()
             }
         }
     }
 
+    /// Mark playback stopped when no source is detected (respects user cooldown).
+    private func markStoppedIfIdle() {
+        if isPlaying && !hasMediaRemoteSession && ContinuousClock.now > userControlUntil {
+            isPlaying = false
+        }
+    }
+
+    /// Detects track info from native music apps.
+    /// Spotify: uses AppleScript for exact track/artist data.
+    /// Others: falls back to AX window title parsing.
+    /// Returns true if a music app with a valid track was found.
+    @discardableResult
+    private func detectFromMusicApps() -> Bool {
+        let apps = NSWorkspace.shared.runningApplications
+        for app in apps {
+            guard let bundleID = app.bundleIdentifier,
+                  Self.musicAppBundleIDs.contains(bundleID),
+                  !app.isTerminated else { continue }
+
+            // Spotify — use AppleScript exclusively (window titles are page names, not tracks).
+            if bundleID == "com.spotify.client" {
+                return detectSpotifyViaScript()
+            }
+
+            let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            var windowsRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+                  let windows = windowsRef as? [AXUIElement] else { continue }
+
+            for window in windows {
+                var titleRef: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
+                      let title = titleRef as? String, !title.isEmpty else { continue }
+
+                let appName = app.localizedName ?? "Music"
+
+                // Skip generic/non-track titles.
+                if title == appName || title.hasPrefix("Spotify")
+                    || title == "Music" || title == "TIDAL" { continue }
+
+                if title != lastWindowTitle {
+                    lastWindowTitle = title
+                    parseMusicAppTitle(title, app: appName)
+                }
+
+                if ContinuousClock.now > userControlUntil && !isPlaying {
+                    isPlaying = true
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Query Spotify's AppleScript interface for exact track info.
+    /// Returns true only when Spotify is actively playing — paused state
+    /// updates track info but returns false so browser detection can run.
+    private func detectSpotifyViaScript() -> Bool {
+        // Skip if user previously denied Automation permission.
+        guard !spotifyScriptDenied else { return false }
+
+        // Compare against enum constants directly (not `as string` which may
+        // return internal codes like "kPSP" instead of "playing").
+        // Use tab as field separator (AppleScript has no \n escape).
+        let script = NSAppleScript(source: """
+            tell application "Spotify"
+                if player state is playing then
+                    return "playing" & tab & (name of current track) & tab & (artist of current track)
+                else if player state is paused then
+                    return "paused" & tab & (name of current track) & tab & (artist of current track)
+                else
+                    return "stopped"
+                end if
+            end tell
+        """)
+        var error: NSDictionary?
+        guard let result = script?.executeAndReturnError(&error),
+              let output = result.stringValue else {
+            if let err = error {
+                // -1743 = errAEEventNotPermitted (user denied Automation).
+                if let code = err[NSAppleScript.errorNumber] as? Int, code == -1743 {
+                    print("[PikoNowPlaying] Spotify Automation denied — stopping AppleScript attempts")
+                    spotifyScriptDenied = true
+                } else {
+                    print("[PikoNowPlaying] Spotify AppleScript error: \(err)")
+                }
+            }
+            return false
+        }
+
+        // Spotify is open but idle / nothing queued.
+        if output.trimmingCharacters(in: .whitespacesAndNewlines) == "stopped" {
+            if ContinuousClock.now > userControlUntil {
+                isPlaying = false
+            }
+            return false
+        }
+
+        let fields = output.components(separatedBy: "\t")
+        guard fields.count >= 3 else { return false }
+
+        let state = fields[0].trimmingCharacters(in: .whitespaces)
+        let newTrack = fields[1].trimmingCharacters(in: .whitespaces)
+        let newArtist = fields[2].trimmingCharacters(in: .whitespaces)
+        guard !newTrack.isEmpty else { return false }
+
+        if trackTitle != newTrack || artistName != newArtist {
+            trackTitle = newTrack
+            artistName = newArtist
+            sourceName = "Spotify"
+            albumArt = nil
+            fetchAlbumArtFromWeb()
+        }
+
+        let playing = (state == "playing")
+        if ContinuousClock.now > userControlUntil {
+            isPlaying = playing
+        }
+        // Only claim ownership when actively playing — paused Spotify
+        // should not block browser detection from finding an active source.
+        return playing
+    }
+
+    /// Parse window title from native music apps (non-Spotify fallback).
+    /// Generic format: "Song — Artist" or "Song - Artist"
+    private func parseMusicAppTitle(_ title: String, app: String) {
+        let cleaned = title
+            .replacingOccurrences(of: " — \(app)", with: "")
+            .replacingOccurrences(of: " - \(app)", with: "")
+            .trimmingCharacters(in: .whitespaces)
+
+        // Try bullet separator: "Song • Artist"
+        let bulletParts = cleaned.split(separator: /\s*[•·]\s*/, maxSplits: 1)
+        if bulletParts.count == 2 {
+            trackTitle = String(bulletParts[0]).trimmingCharacters(in: .whitespaces)
+            artistName = String(bulletParts[1]).trimmingCharacters(in: .whitespaces)
+        } else {
+            // Try dash separator: "Song — Artist"
+            let dashParts = cleaned.split(separator: /\s*[-–—]\s*/, maxSplits: 1)
+            if dashParts.count == 2 {
+                trackTitle = String(dashParts[0]).trimmingCharacters(in: .whitespaces)
+                artistName = String(dashParts[1]).trimmingCharacters(in: .whitespaces)
+            } else {
+                trackTitle = cleaned
+                artistName = ""
+            }
+        }
+        sourceName = app
+        albumArt = nil
+        fetchAlbumArtFromWeb()
+    }
+
     /// Reads browser window titles to find YouTube / music service playing.
-    private func detectFromBrowserWindows() {
+    @discardableResult
+    private func detectFromBrowserWindows() -> Bool {
         let apps = NSWorkspace.shared.runningApplications
         for app in apps {
             guard let bundleID = app.bundleIdentifier,
@@ -270,10 +434,11 @@ final class PikoNowPlaying {
                     if ContinuousClock.now > userControlUntil && !isPlaying {
                         isPlaying = true
                     }
-                    return
+                    return true
                 }
             }
         }
+        return false
     }
 
     /// Parse "Track - Artist - YouTube - Audio playing - Browser" pattern.
