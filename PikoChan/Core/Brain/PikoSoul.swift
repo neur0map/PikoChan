@@ -55,7 +55,7 @@ struct PikoSoul {
     static let validMoodTags = NotchManager.Mood.allCases.map { $0.rawValue.lowercased() }
 
     /// Maximum characters for the system prompt. Prevents context overflow on small models.
-    static let maxSystemPromptChars = 5000
+    static let maxSystemPromptChars = 6000
 
     func systemPrompt(mood: NotchManager.Mood, memories: [String] = []) -> String {
         var parts: [String] = []
@@ -161,6 +161,17 @@ struct PikoSoul {
         [shell:COMMAND] to run a terminal command. [open:URL] to open a URL. \
         Without these tags, NOTHING happens — just saying "playing it now" does NOT play anything. \
         You MUST include the tag for the action to actually execute.
+
+        You can ALSO create persistent scheduled/recurring jobs with [cron:...] tags! \
+        [cron:add:NAME:every:DURATION:PAYLOAD] — recurring (e.g., every:2h, every:30m). \
+        [cron:add:NAME:in:DURATION:PAYLOAD] — one-shot delay (e.g., in:20m). \
+        [cron:add:NAME:cron:MIN HR DOM MON DOW:PAYLOAD] — 5-field cron expression. \
+        PAYLOAD is plain text (reminder), shell:CMD, or open:URL. \
+        [cron:list] to show jobs. [cron:remove:NAME] to delete. \
+        Example: user says "remind me to stretch every 2 hours" → you reply: \
+        "[cron:add:stretch:every:2h:Time to stretch!] Done, I'll bug you every 2 hours~" \
+        Example: "run git pull every morning at 9" → \
+        "[cron:add:git-pull:cron:0 9 * * *:shell:cd ~/project && git pull] Set up daily git pull at 9am!"
 
         When you see <file_context> in the user's message, it contains real files on disk. \
         If there is a "USE THIS EXACT TAG:" line, you MUST include that tag in your response \

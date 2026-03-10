@@ -69,6 +69,8 @@ final class NotchManager {
     let brain: PikoBrain
     /// Set by AppDelegate after heartbeat is created, so config commands can schedule nudges.
     var heartbeat: PikoHeartbeat?
+    /// Set by AppDelegate after cron service is created, so cron commands work from chat.
+    var cronService: PikoCronService?
 
     // MARK: - Voice
 
@@ -663,10 +665,22 @@ final class NotchManager {
                 self.lastResponseText = parsed.cleanText
                 PikoConfigCommand.applyConfigChanges(parsed.configChanges)
                 if let nudge = parsed.scheduledNudge {
-                    self.heartbeat?.scheduleNudge(
-                        afterSeconds: nudge.delaySeconds,
-                        message: nudge.message
-                    )
+                    // Route nudges through cron if available, otherwise heartbeat.
+                    if let cron = self.cronService {
+                        cron.scheduleNudge(afterSeconds: nudge.delaySeconds, message: nudge.message)
+                    } else {
+                        self.heartbeat?.scheduleNudge(
+                            afterSeconds: nudge.delaySeconds,
+                            message: nudge.message
+                        )
+                    }
+                }
+
+                // Parse cron commands from response.
+                let cronParsed = PikoCronCommand.parse(from: self.lastResponseText)
+                self.lastResponseText = cronParsed.cleanText
+                if !cronParsed.commands.isEmpty {
+                    self.cronService?.handleCommands(cronParsed.commands)
                 }
 
                 // Auto-speak response if voice TTS is enabled.

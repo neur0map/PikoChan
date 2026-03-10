@@ -18,6 +18,8 @@ final class PikoHTTPServer {
     var moodSetter: ((NotchManager.Mood) -> Void)?
     /// Set by AppDelegate so config commands can schedule nudges via HTTP too.
     var heartbeat: PikoHeartbeat?
+    /// Set by AppDelegate so cron commands work via HTTP.
+    var cronService: PikoCronService?
 
     init(brain: PikoBrain, port: UInt16, moodSetter: ((NotchManager.Mood) -> Void)? = nil) {
         self.brain = brain
@@ -230,8 +232,17 @@ final class PikoHTTPServer {
             handleConfig(connection: connection)
         case ("POST", "/mood"):
             handleSetMood(body: body, connection: connection)
+        case ("GET", "/cron"):
+            handleCronList(connection: connection)
+        case ("POST", "/cron"):
+            handleCronAdd(body: body, connection: connection)
         default:
-            sendJSON(connection: connection, status: 404, json: ["error": "Not found"])
+            // Dynamic cron routes: /cron/<id>/run, /cron/<id>/pause, /cron/<id>/resume, /cron/<id>/runs
+            if request.path.hasPrefix("/cron/") {
+                handleCronDynamic(request: request, body: body, connection: connection)
+            } else {
+                sendJSON(connection: connection, status: 404, json: ["error": "Not found"])
+            }
         }
 
         let durationMs = Int(Date.now.timeIntervalSince(start) * 1000)
@@ -297,10 +308,21 @@ final class PikoHTTPServer {
             fullResponse = cmdResult.cleanText
             PikoConfigCommand.applyConfigChanges(cmdResult.configChanges)
             if let nudge = cmdResult.scheduledNudge {
-                self.heartbeat?.scheduleNudge(
-                    afterSeconds: nudge.delaySeconds,
-                    message: nudge.message
-                )
+                if let cron = self.cronService {
+                    cron.scheduleNudge(afterSeconds: nudge.delaySeconds, message: nudge.message)
+                } else {
+                    self.heartbeat?.scheduleNudge(
+                        afterSeconds: nudge.delaySeconds,
+                        message: nudge.message
+                    )
+                }
+            }
+
+            // Parse cron commands.
+            let cronParsed = PikoCronCommand.parse(from: fullResponse)
+            fullResponse = cronParsed.cleanText
+            if !cronParsed.commands.isEmpty {
+                self.cronService?.handleCommands(cronParsed.commands)
             }
         }
 
@@ -361,10 +383,21 @@ final class PikoHTTPServer {
             fullResponse = cmdResult.cleanText
             PikoConfigCommand.applyConfigChanges(cmdResult.configChanges)
             if let nudge = cmdResult.scheduledNudge {
-                self.heartbeat?.scheduleNudge(
-                    afterSeconds: nudge.delaySeconds,
-                    message: nudge.message
-                )
+                if let cron = self.cronService {
+                    cron.scheduleNudge(afterSeconds: nudge.delaySeconds, message: nudge.message)
+                } else {
+                    self.heartbeat?.scheduleNudge(
+                        afterSeconds: nudge.delaySeconds,
+                        message: nudge.message
+                    )
+                }
+            }
+
+            // Parse cron commands.
+            let cronParsed = PikoCronCommand.parse(from: fullResponse)
+            fullResponse = cronParsed.cleanText
+            if !cronParsed.commands.isEmpty {
+                self.cronService?.handleCommands(cronParsed.commands)
             }
         }
 
@@ -469,6 +502,118 @@ final class PikoHTTPServer {
             "mood": mood.rawValue.lowercased(),
             "message": "Mood set to \(mood.rawValue)",
         ])
+    }
+
+    // MARK: - Cron Handlers
+
+    private func handleCronList(connection: NWConnection) {
+        guard let cronService else {
+            sendJSON(connection: connection, status: 503, json: ["error": "Cron service not available"])
+            return
+        }
+        let jobs: [[String: Any]] = cronService.jobs.map { job in
+            [
+                "id": job.id.uuidString,
+                "name": job.name,
+                "enabled": job.enabled,
+                "schedule": job.scheduleLabel,
+                "payload_type": job.payload.label,
+                "payload_detail": job.payload.detail,
+                "next_fire": job.state.nextFireDate.map { ISO8601DateFormatter().string(from: $0) } ?? "none",
+                "run_count": job.state.runCount,
+                "last_status": job.state.lastStatus?.rawValue ?? "none",
+            ]
+        }
+        sendJSON(connection: connection, status: 200, json: ["jobs": jobs, "count": jobs.count])
+    }
+
+    private func handleCronAdd(body: Data?, connection: NWConnection) {
+        guard let cronService else {
+            sendJSON(connection: connection, status: 503, json: ["error": "Cron service not available"])
+            return
+        }
+        guard let body, let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let name = json["name"] as? String,
+              let scheduleStr = json["schedule"] as? String,
+              let schedule = PikoCronSchedule.parse(from: scheduleStr)
+        else {
+            sendJSON(connection: connection, status: 400, json: ["error": "Missing name, schedule, or payload"])
+            return
+        }
+
+        let payloadStr = json["payload"] as? String ?? name
+        let payload: PikoCronPayload
+        if payloadStr.hasPrefix("shell:") {
+            payload = .shell(String(payloadStr.dropFirst(6)))
+        } else if payloadStr.hasPrefix("open:") {
+            payload = .open(String(payloadStr.dropFirst(5)))
+        } else {
+            payload = .reminder(payloadStr)
+        }
+
+        cronService.addJob(name: name, schedule: schedule, payload: payload)
+        sendJSON(connection: connection, status: 200, json: ["message": "Job added", "name": name])
+    }
+
+    private func handleCronDynamic(request: HTTPRequest, body: Data?, connection: NWConnection) {
+        guard let cronService else {
+            sendJSON(connection: connection, status: 503, json: ["error": "Cron service not available"])
+            return
+        }
+
+        // Parse /cron/<id> or /cron/<id>/action
+        let parts = request.path.split(separator: "/").map(String.init) // ["cron", "<id>", "action"?]
+        guard parts.count >= 2 else {
+            sendJSON(connection: connection, status: 404, json: ["error": "Not found"])
+            return
+        }
+
+        let idStr = parts[1]
+
+        if request.method == "DELETE" && parts.count == 2 {
+            cronService.removeJob(nameOrID: idStr)
+            sendJSON(connection: connection, status: 200, json: ["message": "Removed"])
+            return
+        }
+
+        guard parts.count >= 3 else {
+            sendJSON(connection: connection, status: 404, json: ["error": "Not found"])
+            return
+        }
+
+        let action = parts[2]
+        switch (request.method, action) {
+        case ("POST", "run"):
+            cronService.runJob(nameOrID: idStr)
+            sendJSON(connection: connection, status: 200, json: ["message": "Running"])
+        case ("POST", "pause"):
+            cronService.pauseJob(nameOrID: idStr)
+            sendJSON(connection: connection, status: 200, json: ["message": "Paused"])
+        case ("POST", "resume"):
+            cronService.resumeJob(nameOrID: idStr)
+            sendJSON(connection: connection, status: 200, json: ["message": "Resumed"])
+        case ("GET", "runs"):
+            guard let job = cronService.jobs.first(where: {
+                $0.id.uuidString == idStr || $0.name.lowercased() == idStr.lowercased()
+            }) else {
+                sendJSON(connection: connection, status: 404, json: ["error": "Job not found"])
+                return
+            }
+            let store = PikoCronStore(cronDir: PikoHome().cronDir)
+            store.load()
+            let records = store.runRecords(forJob: job.id)
+            let runs: [[String: Any]] = records.map { r in
+                [
+                    "time": ISO8601DateFormatter().string(from: r.time),
+                    "status": r.status.rawValue,
+                    "duration_ms": r.durationMs,
+                    "output": String(r.output.prefix(1000)),
+                ]
+            }
+            sendJSON(connection: connection, status: 200, json: ["runs": runs, "count": runs.count])
+        default:
+            sendJSON(connection: connection, status: 404, json: ["error": "Not found"])
+        }
     }
 
     // MARK: - Response Helpers

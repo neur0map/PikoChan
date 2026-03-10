@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.5.5-alpha — Cron Scheduler
+
+Persistent, recurring scheduled jobs with full cron expression support.
+
+- **Cron scheduler**: create recurring jobs via `[cron:add:NAME:SCHEDULE:PAYLOAD]` tags — reminders, shell commands, or URL opens on schedule
+- **5-field cron expressions**: full parser supporting `*`, `N`, `N-M`, `*/N`, `N,M,O`, `N-M/S` for minute/hour/day/month/weekday
+- **Duration scheduling**: `every:2h`, `in:20m`, `at:2026-03-10T09:00:00` shorthand formats alongside cron expressions
+- **JSON persistence**: jobs saved to `~/.pikochan/cron/jobs.json` with atomic writes and backup. Run records as JSONL per job
+- **Auto-disable**: 3 consecutive failures auto-pause a job and notify the user. Counter resets on success
+- **Quiet hours**: reminder payloads skip during configured quiet hours
+- **Nudge backward compat**: `[nudge_after:SECONDS:MESSAGE]` now routes through cron system when available
+- **HTTP API**: GET/POST `/cron`, DELETE `/cron/:id`, POST `/cron/:id/run|pause|resume`, GET `/cron/:id/runs`
+- **Settings tab**: Cron tab with job rows, payload type badges, next fire time, run/pause/delete buttons
+- **Gateway logging**: 7 new cron event types (tick, add, remove, fire, pause, resume, disabled) under `.cron` subsystem
+
 ## v0.5.4-alpha — Notch UI Redesign + Apple STT
 
 Minimal ghost aesthetic and on-device voice input.

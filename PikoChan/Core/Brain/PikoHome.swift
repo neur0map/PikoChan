@@ -16,6 +16,9 @@ struct PikoHome {
     var mcpDir: URL { root.appendingPathComponent("mcp", isDirectory: true) }
     var modelsDir: URL { root.appendingPathComponent("models", isDirectory: true) }
     var logsDir: URL { root.appendingPathComponent("logs", isDirectory: true) }
+    var cronDir: URL { root.appendingPathComponent("cron", isDirectory: true) }
+    var cronRunsDir: URL { cronDir.appendingPathComponent("runs", isDirectory: true) }
+    var cronJobsFile: URL { cronDir.appendingPathComponent("jobs.json") }
     var voiceDir: URL { root.appendingPathComponent("voice", isDirectory: true) }
     var voiceModelsDir: URL { voiceDir.appendingPathComponent("models", isDirectory: true) }
     var voiceServerFile: URL { voiceDir.appendingPathComponent("server.py") }
@@ -32,7 +35,7 @@ struct PikoHome {
     var mcpServersFile: URL { mcpDir.appendingPathComponent("servers.yaml") }
 
     func bootstrap(fileManager: FileManager = .default) throws {
-        let dirs = [root, soulDir, skillsDir, customSkillsDir, memoryDir, mcpDir, modelsDir, logsDir, voiceDir, voiceModelsDir]
+        let dirs = [root, soulDir, skillsDir, customSkillsDir, memoryDir, mcpDir, modelsDir, logsDir, voiceDir, voiceModelsDir, cronDir, cronRunsDir]
         for dir in dirs {
             try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         }

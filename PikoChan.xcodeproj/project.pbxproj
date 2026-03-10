@@ -261,8 +261,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "PikoChan needs Automation access to detect Now Playing info from music apps like Spotify.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PikoChan needs microphone access for voice input.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "PikoChan uses speech recognition for voice-to-text dictation.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -298,8 +298,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "PikoChan needs Automation access to detect Now Playing info from music apps like Spotify.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "PikoChan needs microphone access for voice input.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "PikoChan uses speech recognition for voice-to-text dictation.";
 				LD_RUNPATH_SEARCH_PATHS = (

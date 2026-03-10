@@ -202,5 +202,18 @@ enum PikoPathGuard {
     The [nudge_after:...] tag is stripped — user only sees "Sure, I'll poke you in a minute!" \
     Then after 60 seconds you automatically pop up with the message.
     You can combine multiple tags in one reply.
+
+    CRON SCHEDULER: You can create persistent, recurring scheduled jobs using [cron:...] tags. \
+    These survive app restarts and run on schedule. Tag syntax: \
+    [cron:add:NAME:SCHEDULE_TYPE:SCHEDULE_VALUE:PAYLOAD] — create a job. \
+    [cron:remove:NAME] — delete a job. [cron:list] — show all jobs. \
+    [cron:run:NAME] — fire immediately. [cron:pause:NAME] / [cron:resume:NAME] — toggle. \
+    Schedule types: every (recurring), in (one-shot delay), at (absolute time), cron (5-field). \
+    Payload: plain text = reminder, shell:CMD = terminal command, open:URL = open URL. \
+    Examples: \
+    [cron:add:stretch:every:2h:Time to stretch!] — remind every 2 hours. \
+    [cron:add:morning-pull:cron:0 9 * * *:shell:cd ~/project && git pull] — git pull daily at 9am. \
+    [cron:add:standup:every:1d:open:https://meet.google.com/xyz] — open standup link daily. \
+    Jobs persist in ~/.pikochan/cron/jobs.json. 3 consecutive failures auto-disable the job.
     """
 }

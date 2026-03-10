@@ -72,6 +72,13 @@ final class PikoGateway {
         case actionResult = "action_result"
         case actionBlocked = "action_blocked"
         case skillsReload = "skills_reload"
+        case cronTick = "cron_tick"
+        case cronAdd = "cron_add"
+        case cronRemove = "cron_remove"
+        case cronFire = "cron_fire"
+        case cronPause = "cron_pause"
+        case cronResume = "cron_resume"
+        case cronDisabled = "cron_disabled"
     }
 
     enum Subsystem: String, Encodable {
@@ -85,6 +92,7 @@ final class PikoGateway {
         case heartbeat
         case voice
         case skills
+        case cron
     }
 
     // MARK: - Log Events
@@ -396,6 +404,50 @@ final class PikoGateway {
     func logSkillsReload(count: Int) {
         log(type: .skillsReload, subsystem: .skills, data: [
             "count": String(count),
+        ])
+    }
+
+    // MARK: - Cron Events
+
+    func logCronTick(jobCount: Int, firedCount: Int) {
+        log(type: .cronTick, subsystem: .cron, data: [
+            "job_count": String(jobCount),
+            "fired_count": String(firedCount),
+        ])
+    }
+
+    func logCronAdd(name: String, schedule: String, payload: String) {
+        log(type: .cronAdd, subsystem: .cron, data: [
+            "name": name,
+            "schedule": schedule,
+            "payload": payload,
+        ])
+    }
+
+    func logCronRemove(name: String) {
+        log(type: .cronRemove, subsystem: .cron, data: ["name": name])
+    }
+
+    func logCronFire(name: String, payload: String, detail: String) {
+        log(type: .cronFire, subsystem: .cron, data: [
+            "name": name,
+            "payload": payload,
+            "detail": truncate(detail, max: 500),
+        ])
+    }
+
+    func logCronPause(name: String) {
+        log(type: .cronPause, subsystem: .cron, data: ["name": name])
+    }
+
+    func logCronResume(name: String) {
+        log(type: .cronResume, subsystem: .cron, data: ["name": name])
+    }
+
+    func logCronDisabled(name: String, reason: String) {
+        log(type: .cronDisabled, subsystem: .cron, data: [
+            "name": name,
+            "reason": reason,
         ])
     }
 

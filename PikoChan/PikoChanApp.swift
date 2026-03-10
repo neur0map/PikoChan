@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchManager: NotchManager?
     private var httpServer: PikoHTTPServer?
     private var heartbeat: PikoHeartbeat?
+    private var cronService: PikoCronService?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide from Dock — PikoChan lives in the notch, not the taskbar.
@@ -63,6 +64,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.heartbeat = hb
         server.heartbeat = hb
 
+        // Cron scheduler — persistent recurring jobs.
+        let cronStore = PikoCronStore(cronDir: PikoHome().cronDir)
+        let cron = PikoCronService(store: cronStore, notchManager: manager)
+        cron.start()
+        cronService = cron
+        manager.cronService = cron
+        server.cronService = cron
+
         // Auto-start local TTS server if configured.
         let voiceConfig = PikoVoiceConfigStore.shared.currentConfig
         if voiceConfig.ttsProvider == .local && !voiceConfig.localModelPath.isEmpty {
@@ -71,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        cronService?.stop()
         PikoVoiceServer.shared.stop()
         heartbeat?.stop()
         httpServer?.stop()
