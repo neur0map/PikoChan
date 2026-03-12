@@ -243,8 +243,8 @@ final class NotchManager {
         )
         menubarHeight = screen.menubarHeight
 
-        let pw: CGFloat = max(380, notchSize.width + 200)
-        let ph: CGFloat = 480
+        let pw: CGFloat = max(440, notchSize.width + 260)
+        let ph: CGFloat = 540
         panelSize = CGSize(width: pw, height: ph)
 
         let origin = NSPoint(
@@ -346,7 +346,7 @@ final class NotchManager {
     }
 
     var activeContentWidth: CGFloat {
-        hasFeedContent ? 360 : 320
+        hasFeedContent ? 420 : 360
     }
 
     var showsResponseBubble: Bool {
@@ -561,6 +561,9 @@ final class NotchManager {
         addFeedItem(.userMessage(prompt))
         transition(to: .expanded)
 
+        // Pre-scan input for API keys — store in Keychain, replace with sentinels.
+        let sanitizedPrompt = Self.prescanSecrets(prompt)
+
         currentResponseTask = Task { [weak self] in
             guard let self else { return }
             self.brain.reloadConfig()
@@ -570,7 +573,7 @@ final class NotchManager {
             var hasContent = false
             var moodParsed = false
             var rawAccumulated = ""
-            for await chunk in self.brain.respondStreaming(to: prompt, mood: self.currentMood) {
+            for await chunk in self.brain.respondStreaming(to: sanitizedPrompt, mood: self.currentMood) {
                 guard !Task.isCancelled else { break }
                 // Detect embedded error markers from the stream.
                 if chunk.hasPrefix("\n\n[Error: ") {
@@ -611,29 +614,48 @@ final class NotchManager {
                 self.lastResponseText = rawAccumulated
             }
 
-            // Parse action tags + execute actions.
+            // ── Parse ALL tags before adding feed items ──
+            // Order: actions → config → cron → MCP → fully clean text.
             if !self.lastResponseText.isEmpty {
                 self.actionHandler.reset()
-                let (cleanText, actions) = self.actionHandler.parseActions(from: self.lastResponseText)
+
+                // 1. Parse shell/open action tags.
+                let (afterActions, actions) = self.actionHandler.parseActions(from: self.lastResponseText)
+                var cleanText = afterActions
+
+                // 2. Parse config commands + scheduled nudges.
+                let configParsed = PikoConfigCommand.parse(from: cleanText)
+                cleanText = configParsed.cleanText
+
+                // 3. Parse cron commands.
+                let cronParsed = PikoCronCommand.parse(from: cleanText)
+                cleanText = cronParsed.cleanText
+
+                // 4. Parse MCP commands.
+                let mcpParsed = PikoMCPCommand.parse(from: cleanText)
+                cleanText = mcpParsed.cleanText
+
                 self.lastResponseText = cleanText
 
-                // Add assistant message to feed (with action tags stripped).
+                // ── Add feed items with fully clean text ──
                 if !cleanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     self.addFeedItem(.assistantMessage(cleanText))
+                } else if hasContent && actions.isEmpty && mcpParsed.commands.isEmpty {
+                    // Had content but all stripped — show raw response.
+                    self.addFeedItem(.assistantMessage(self.lastResponseText))
                 }
 
-                // Add action references to feed.
+                // Add action references to feed (shell/open).
                 for action in actions {
                     self.addFeedItem(.actionRef(action.id))
                 }
 
+                // ── Execute shell/open actions ──
                 if !actions.isEmpty {
-                    // Lower panel so macOS permission dialogs (TCC) are clickable.
                     self.panel?.level = .floating
                     let _ = await self.actionHandler.executeAutoApproved()
                     self.panel?.level = .screenSaver
 
-                    // Re-query LLM for summary if any shell commands completed.
                     if self.actionHandler.hasCompletedShellActions {
                         self.isResponding = true
                         self.isResponseExpanded = false
@@ -652,22 +674,11 @@ final class NotchManager {
                         self.isResponding = false
                         self.updateVisibleContentRect()
                     }
-                } else if cleanText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && hasContent {
-                    // No actions and no clean text but had content — add raw response.
-                    self.addFeedItem(.assistantMessage(self.lastResponseText))
                 }
-            } else if hasContent {
-                // Response had content but lastResponseText ended up empty after mood parse.
-                // This shouldn't normally happen, but handle gracefully.
-            }
 
-            // Parse config commands + scheduled nudges from response.
-            if !self.lastResponseText.isEmpty {
-                let parsed = PikoConfigCommand.parse(from: self.lastResponseText)
-                self.lastResponseText = parsed.cleanText
-                PikoConfigCommand.applyConfigChanges(parsed.configChanges)
-                if let nudge = parsed.scheduledNudge {
-                    // Route nudges through cron if available, otherwise heartbeat.
+                // ── Apply config side effects ──
+                PikoConfigCommand.applyConfigChanges(configParsed.configChanges)
+                if let nudge = configParsed.scheduledNudge {
                     if let cron = self.cronService {
                         cron.scheduleNudge(afterSeconds: nudge.delaySeconds, message: nudge.message)
                     } else {
@@ -678,22 +689,20 @@ final class NotchManager {
                     }
                 }
 
-                // Parse cron commands from response.
-                let cronParsed = PikoCronCommand.parse(from: self.lastResponseText)
-                self.lastResponseText = cronParsed.cleanText
+                // ── Apply cron side effects ──
                 if !cronParsed.commands.isEmpty {
                     self.cronService?.handleCommands(cronParsed.commands)
                 }
 
-                // Parse MCP commands from response.
-                let mcpParsed = PikoMCPCommand.parse(from: self.lastResponseText)
-                self.lastResponseText = mcpParsed.cleanText
+                // ── Execute MCP commands (creates action refs, not message bubbles) ──
                 if !mcpParsed.commands.isEmpty {
                     await self.handleMCPCommands(mcpParsed.commands)
                 }
 
                 // Auto-speak response if voice TTS is enabled.
                 self.speakIfEnabled(self.lastResponseText)
+            } else if hasContent {
+                // Response had content but lastResponseText ended up empty after mood parse.
             }
 
             if !Task.isCancelled {
@@ -708,43 +717,132 @@ final class NotchManager {
         }
     }
 
+    // MARK: - Input Secret Pre-Scan
+
+    /// Scans user input for MCP-style configs with sensitive env values (API keys, tokens, etc.).
+    /// Stores real values in Keychain and replaces them with `__keychain__` sentinel before
+    /// the text is sent to the LLM — the model never sees the actual secret.
+    private static func prescanSecrets(_ text: String) -> String {
+        var result = text
+
+        // Match "SENSITIVE_KEY": "value" where key contains KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL.
+        let pattern = /\"([A-Z_]*(?:KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[A-Z_]*)\"\s*:\s*\"([^\"]+)\"/
+        var found: [(envKey: String, value: String)] = []
+        for match in text.matches(of: pattern) {
+            let envKey = String(match.1)
+            let value = String(match.2)
+            if value == "__keychain__" || value.isEmpty || value.hasPrefix("__") { continue }
+            found.append((envKey, value))
+        }
+        guard !found.isEmpty else { return text }
+
+        let serverName = extractMCPServerName(from: text) ?? "prescan"
+        for (envKey, value) in found {
+            PikoKeychain.save(account: "mcp_\(serverName)_\(envKey)", value: value)
+            result = result.replacingOccurrences(of: "\"\(value)\"", with: "\"__keychain__\"")
+        }
+
+        return result
+    }
+
+    /// Tries to extract a server name from pasted MCP config JSON.
+    private static func extractMCPServerName(from text: String) -> String? {
+        // "name": "xxx"
+        let namePattern = /\"name\"\s*:\s*\"([^\"]+)\"/
+        if let match = text.firstMatch(of: namePattern) {
+            return String(match.1)
+        }
+        // "mcpServers": { "xxx":
+        let mcpPattern = /\"mcpServers\"\s*:\s*\{\s*\"([^\"]+)\"/
+        if let match = text.firstMatch(of: mcpPattern) {
+            return String(match.1)
+        }
+        // @org/mcp-server → extract org name
+        let pkgPattern = /@([a-z0-9-]+)\//
+        if let match = text.firstMatch(of: pkgPattern) {
+            return String(match.1).replacingOccurrences(of: "-ai", with: "")
+        }
+        return nil
+    }
+
     // MARK: - MCP Command Handling
 
     private func handleMCPCommands(_ commands: [PikoMCPCommand.Command]) async {
         guard let mcpManager else { return }
 
-        var toolResults: [(server: String, tool: String, result: PikoMCPToolResult)] = []
+        var toolResultData: [(server: String, tool: String, content: String, isError: Bool)] = []
 
         for command in commands {
             switch command {
             case .install(let config):
-                self.addFeedItem(.assistantMessage("Installing MCP server: \(config.name)..."))
+                let action = PikoAction(
+                    kind: .mcpInstall(serverName: config.name),
+                    needsConfirmation: false,
+                    status: .executing
+                )
+                self.actionHandler.actions.append(action)
+                self.addFeedItem(.actionRef(action.id))
+
                 do {
                     try await mcpManager.installServer(config, brain: self.brain)
                     let toolCount = mcpManager.toolCountForServer(name: config.name)
-                    self.addFeedItem(.assistantMessage("\(config.name) installed with \(toolCount) tools."))
+                    if let idx = self.actionHandler.actions.firstIndex(where: { $0.id == action.id }) {
+                        self.actionHandler.actions[idx].status = .completedMCP(
+                            content: "\(config.name) installed with \(toolCount) tools.",
+                            isError: false
+                        )
+                    }
                 } catch {
-                    self.addFeedItem(.assistantMessage("Failed to install \(config.name): \(error.localizedDescription)"))
+                    if let idx = self.actionHandler.actions.firstIndex(where: { $0.id == action.id }) {
+                        self.actionHandler.actions[idx].status = .completedMCP(
+                            content: "Failed: \(error.localizedDescription)",
+                            isError: true
+                        )
+                    }
                 }
 
             case .toolCall(let serverName, let toolName, let arguments):
+                let action = PikoAction(
+                    kind: .mcpToolCall(serverName: serverName, toolName: toolName),
+                    needsConfirmation: false,
+                    status: .executing
+                )
+                self.actionHandler.actions.append(action)
+                self.addFeedItem(.actionRef(action.id))
+
                 do {
                     let result = try await mcpManager.callTool(
                         serverName: serverName,
                         toolName: toolName,
                         arguments: arguments
                     )
-                    toolResults.append((serverName, toolName, result))
+                    if let idx = self.actionHandler.actions.firstIndex(where: { $0.id == action.id }) {
+                        self.actionHandler.actions[idx].status = .completedMCP(
+                            content: result.content,
+                            isError: result.isError
+                        )
+                    }
+                    toolResultData.append((serverName, toolName, result.content, result.isError))
                 } catch {
-                    toolResults.append((serverName, toolName, PikoMCPToolResult(
-                        content: "Error: \(error.localizedDescription)",
-                        isError: true
-                    )))
+                    let errMsg = error.localizedDescription
+                    if let idx = self.actionHandler.actions.firstIndex(where: { $0.id == action.id }) {
+                        self.actionHandler.actions[idx].status = .completedMCP(
+                            content: "Error: \(errMsg)",
+                            isError: true
+                        )
+                    }
+                    toolResultData.append((serverName, toolName, "Error: \(errMsg)", true))
                 }
 
             case .remove(let serverName):
                 mcpManager.removeServer(name: serverName)
-                self.addFeedItem(.assistantMessage("Removed MCP server: \(serverName)"))
+                let action = PikoAction(
+                    kind: .mcpInstall(serverName: serverName),
+                    needsConfirmation: false,
+                    status: .completedMCP(content: "Removed MCP server: \(serverName)", isError: false)
+                )
+                self.actionHandler.actions.append(action)
+                self.addFeedItem(.actionRef(action.id))
 
             case .list:
                 let list = mcpManager.servers.map { s -> String in
@@ -753,19 +851,21 @@ final class NotchManager {
                     return "- \(s.name): \(status.label) (\(tools) tools)"
                 }
                 let msg = list.isEmpty ? "No MCP servers installed." : list.joined(separator: "\n")
-                self.addFeedItem(.assistantMessage(msg))
+                let action = PikoAction(
+                    kind: .mcpInstall(serverName: "mcp"),
+                    needsConfirmation: false,
+                    status: .completedMCP(content: msg, isError: false)
+                )
+                self.actionHandler.actions.append(action)
+                self.addFeedItem(.actionRef(action.id))
             }
         }
 
         // Re-query LLM with tool results for summary.
-        if !toolResults.isEmpty {
+        if !toolResultData.isEmpty {
             self.isResponding = true
             self.isResponseExpanded = false
-            let resultBlock = toolResults.map { r in
-                "[\(r.server).\(r.tool)] \(r.result.isError ? "ERROR: " : "")\(String(r.result.content.prefix(2000)))"
-            }.joined(separator: "\n\n")
-
-            let requeryMsg = "Here are the MCP tool results:\n\n\(resultBlock)\n\nSummarize these results for the user concisely."
+            let requeryMsg = PikoActionHandler.formatMCPResultsForRequery(results: toolResultData)
             if let summary = try? await self.brain.respond(
                 to: requeryMsg,
                 mood: self.currentMood,

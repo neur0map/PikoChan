@@ -62,6 +62,7 @@ enum PikoMCPCommand {
     // MARK: - Install Parser
 
     /// Parse `[mcp:install:{...}]` tags using JSON-aware bracket counting.
+    /// Truncated or malformed tags are stripped from the output (never shown to user).
     private static func parseInstallCommands(from text: String, into commands: inout [Command]) -> String {
         var result = text
         let prefix = "[mcp:install:"
@@ -71,16 +72,19 @@ enum PikoMCPCommand {
 
             guard let jsonEnd = findJSONEnd(in: result, from: afterPrefix),
                   jsonEnd < result.endIndex else {
+                // Truncated JSON — strip from [mcp:install: to end of string.
+                result = String(result[..<startRange.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 break
             }
 
             // Expect `]` after JSON.
             let closingIdx = jsonEnd
             guard closingIdx < result.endIndex, result[closingIdx] == "]" else {
-                // Try next occurrence.
-                let nextSearch = result[afterPrefix...]
-                guard nextSearch.range(of: prefix) != nil else { break }
-                continue
+                // Malformed — strip from tag start to end.
+                result = String(result[..<startRange.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                break
             }
 
             let jsonStr = String(result[afterPrefix..<jsonEnd])

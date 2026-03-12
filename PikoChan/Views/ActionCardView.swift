@@ -91,6 +91,25 @@ struct ActionCardView: View {
                         )
                 }
 
+            case .completedMCP(let content, let isError):
+                HStack(spacing: 4) {
+                    Text(isError ? "error" : "done")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(isError ? .red.opacity(0.7) : .green.opacity(0.7))
+                }
+                if !content.isEmpty {
+                    Text(content)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(.black.opacity(0.3))
+                        )
+                }
+
             case .cancelled:
                 Text("Cancelled")
                     .font(.system(size: 10))
@@ -120,6 +139,8 @@ struct ActionCardView: View {
         switch action.kind {
         case .shell(let cmd): cmd
         case .openURL(let url): url
+        case .mcpInstall(let serverName): serverName
+        case .mcpToolCall(let serverName, let toolName): "\(serverName).\(toolName)"
         }
     }
 
@@ -127,6 +148,8 @@ struct ActionCardView: View {
         switch action.kind {
         case .shell: "terminal"
         case .openURL: "globe"
+        case .mcpInstall: "puzzlepiece.extension"
+        case .mcpToolCall: "puzzlepiece"
         }
     }
 
@@ -134,6 +157,7 @@ struct ActionCardView: View {
         switch action.status {
         case .completed(let r) where r.exitCode == 0: .green.opacity(0.7)
         case .completed: .red.opacity(0.7)
+        case .completedMCP(_, let isError): isError ? .red.opacity(0.7) : .green.opacity(0.7)
         case .executing: .blue.opacity(0.7)
         case .cancelled: .white.opacity(0.3)
         case .failed: .red.opacity(0.7)

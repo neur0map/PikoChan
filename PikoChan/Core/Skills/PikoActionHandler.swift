@@ -6,19 +6,28 @@ struct PikoAction: Identifiable {
     enum Kind {
         case shell(command: String)
         case openURL(url: String)
+        case mcpInstall(serverName: String)
+        case mcpToolCall(serverName: String, toolName: String)
     }
 
     enum Status {
         case pending
         case executing
         case completed(PikoTerminal.CommandResult)
+        case completedMCP(content: String, isError: Bool)
         case cancelled
         case failed(String)
     }
 
     let kind: Kind
     let needsConfirmation: Bool
-    var status: Status = .pending
+    var status: Status
+
+    init(kind: Kind, needsConfirmation: Bool, status: Status = .pending) {
+        self.kind = kind
+        self.needsConfirmation = needsConfirmation
+        self.status = status
+    }
 
     var isPending: Bool {
         if case .pending = status { return true }
@@ -128,6 +137,10 @@ final class PikoActionHandler {
                     actions[i].status = .failed("Invalid URL")
                 }
                 executed.append(actions[i])
+
+            case .mcpInstall, .mcpToolCall:
+                // MCP actions are executed by handleMCPCommands, not here.
+                break
             }
         }
 
@@ -161,6 +174,9 @@ final class PikoActionHandler {
                     stdout: "Opened in browser", stderr: "",
                     truncated: false, timedOut: false, durationMs: 0))
                 : .failed("Invalid URL")
+
+        case .mcpInstall, .mcpToolCall:
+            break
         }
 
         isExecuting = false
@@ -201,10 +217,28 @@ final class PikoActionHandler {
         return parts.joined(separator: "\n")
     }
 
+    /// Builds a message for LLM re-query with MCP tool results.
+    static func formatMCPResultsForRequery(results: [(server: String, tool: String, content: String, isError: Bool)]) -> String {
+        var parts: [String] = ["Here are the MCP tool results:"]
+        for r in results {
+            parts.append("[\(r.server).\(r.tool)] \(r.isError ? "ERROR: " : "")\(String(r.content.prefix(2000)))")
+        }
+        parts.append("\nSummarize these results for the user concisely. Use plain text only — no markdown formatting like **bold** or *italic*. Do NOT use [mcp:], [shell:], [open:], or any action tags in your response.")
+        return parts.joined(separator: "\n\n")
+    }
+
     /// Whether any completed shell actions have output worth re-querying about.
     var hasCompletedShellActions: Bool {
         actions.contains { action in
             if case .shell = action.kind, case .completed = action.status { return true }
+            return false
+        }
+    }
+
+    /// Whether any MCP tool call actions completed with results.
+    var hasCompletedMCPToolCalls: Bool {
+        actions.contains { action in
+            if case .mcpToolCall = action.kind, case .completedMCP = action.status { return true }
             return false
         }
     }

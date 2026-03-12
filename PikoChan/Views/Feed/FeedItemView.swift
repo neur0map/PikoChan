@@ -40,7 +40,8 @@ private struct UserFeedRow: View {
             Text(text)
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.85))
-                .lineLimit(3)
+                .lineLimit(4)
+                .truncationMode(.tail)
                 .multilineTextAlignment(.trailing)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -57,9 +58,12 @@ private struct UserFeedRow: View {
 private struct AssistantFeedRow: View {
     let text: String
 
-    /// Strip markdown bold markers from LLM output.
+    /// Strip markdown bold markers and leftover tag fragments from LLM output.
     private var cleanText: String {
-        text.replacingOccurrences(of: "**", with: "")
+        var result = text.replacingOccurrences(of: "**", with: "")
+        // Strip any leftover action/MCP tags that slipped through.
+        result = StreamingFeedRow.stripTagsForDisplay(result)
+        return result
     }
 
     var body: some View {
@@ -68,7 +72,8 @@ private struct AssistantFeedRow: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(12)
+                .truncationMode(.tail)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .background(
@@ -95,6 +100,8 @@ struct ActionFeedRow: View {
         switch action.kind {
         case .shell(let cmd): cmd
         case .openURL(let url): url
+        case .mcpInstall(let serverName): serverName
+        case .mcpToolCall(let serverName, let toolName): "\(serverName).\(toolName)"
         }
     }
 
@@ -102,6 +109,8 @@ struct ActionFeedRow: View {
         switch action.kind {
         case .shell: "terminal"
         case .openURL: "globe"
+        case .mcpInstall: "puzzlepiece.extension"
+        case .mcpToolCall: "puzzlepiece"
         }
     }
 
@@ -143,6 +152,12 @@ struct ActionFeedRow: View {
                         Text("exit \(result.exitCode)")
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(result.exitCode == 0 ? .green.opacity(0.7) : .red.opacity(0.7))
+                    }
+
+                    if case .completedMCP(_, let isError) = action.status {
+                        Text(isError ? "error" : "done")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(isError ? .red.opacity(0.7) : .green.opacity(0.7))
                     }
 
                     if case .executing = action.status {
@@ -187,6 +202,10 @@ struct ActionFeedRow: View {
             // Result content (collapsed by default)
             if case .completed(let result) = action.status {
                 completedResultView(result)
+            }
+
+            if case .completedMCP(let content, let isError) = action.status {
+                mcpResultView(content: content, isError: isError)
             }
 
             if case .failed(let reason) = action.status {
@@ -243,12 +262,57 @@ struct ActionFeedRow: View {
         }
     }
 
+    // MARK: - MCP Result View
+
+    @ViewBuilder
+    private func mcpResultView(content: String, isError: Bool) -> some View {
+        if !content.isEmpty {
+            let lines = content.components(separatedBy: "\n")
+
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .rotationEffect(.degrees(isOutputExpanded ? 90 : 0))
+                Text("Result (\(lines.count) lines)")
+                    .font(.system(size: 9))
+                Spacer()
+            }
+            .foregroundStyle(.white.opacity(0.35))
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                    isOutputExpanded.toggle()
+                }
+            }
+
+            if isOutputExpanded {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                        Text(line.isEmpty ? " " : line)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(isError ? .red.opacity(0.6) : .white.opacity(0.5))
+                    }
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(.black.opacity(0.3))
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private var toolLabel: String {
         switch action.kind {
         case .shell: "Bash"
         case .openURL: "Open"
+        case .mcpInstall: "MCP"
+        case .mcpToolCall(let serverName, _): serverName
         }
     }
 
@@ -262,6 +326,8 @@ struct ActionFeedRow: View {
             .white.opacity(0.6)
         case .completed:
             .red.opacity(0.7)
+        case .completedMCP(_, let isError):
+            isError ? .red.opacity(0.7) : .white.opacity(0.6)
         case .failed:
             .red.opacity(0.7)
         default:
@@ -283,13 +349,36 @@ struct ActionFeedRow: View {
 struct StreamingFeedRow: View {
     let text: String
 
+    /// Strips known action/MCP/config/cron tags from streaming text so the user
+    /// never sees raw `[mcp:install:{...}]` or `[shell:...]` during generation.
+    private var displayText: String {
+        Self.stripTagsForDisplay(text.replacingOccurrences(of: "**", with: ""))
+    }
+
+    /// Hides everything from the first recognized tag prefix onward.
+    /// During streaming, tags appear at the tail — truncating is safe.
+    /// The final clean text is shown in AssistantFeedRow after streaming completes.
+    static func stripTagsForDisplay(_ text: String) -> String {
+        let tagPrefixes = ["[mcp:", "[shell:", "[open:", "[config:", "[cron:", "[nudge_after:"]
+        var earliestIdx: String.Index?
+        for prefix in tagPrefixes {
+            if let range = text.range(of: prefix) {
+                if earliestIdx == nil || range.lowerBound < earliestIdx! {
+                    earliestIdx = range.lowerBound
+                }
+            }
+        }
+        let result = earliestIdx.map { String(text[..<$0]) } ?? text
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         HStack {
             Group {
-                if text.isEmpty {
+                if displayText.isEmpty {
                     StreamingDots()
                 } else {
-                    Text(text.replacingOccurrences(of: "**", with: ""))
+                    Text(displayText)
                         .font(.system(size: 12))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.leading)

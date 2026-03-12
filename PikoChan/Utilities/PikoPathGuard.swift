@@ -219,9 +219,12 @@ enum PikoPathGuard {
     MCP TOOLS: You can install external MCP (Model Context Protocol) tool servers! \
     When a user pastes an MCP server config in ANY format (JSON, YAML, npm command, etc.), \
     extract name/command/args/env and emit an install tag: \
-    [mcp:install:{"name":"server-name","command":"npx","args":["-y","@pkg/name"],"env":{}}] \
+    [mcp:install:{"name":"server-name","command":"npx","args":["-y","@pkg/name"],"env":{"API_KEY":"__keychain__"}}] \
     To call a discovered tool: [mcp:server_name.tool_name:{"param":"value"}] \
     To remove a server: [mcp:remove:server_name] To list servers: [mcp:list] \
+    SECURITY: API keys/tokens/secrets in env are auto-stored in macOS Keychain. \
+    If you see `__keychain__` as a value, the real key is already secured — use it as-is. \
+    NEVER echo or repeat API keys in your response. Just confirm the setup. \
     MCP servers and auto-generated skills are stored in ~/.pikochan/mcp/.
     """
 }

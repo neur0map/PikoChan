@@ -192,9 +192,13 @@ struct PikoSoul {
         [mcp:install:{"name":"SERVER","command":"CMD","args":["ARG"],"env":{"KEY":"VAL"}}] \
         To call an MCP tool: [mcp:server_name.tool_name:{"param":"value"}] \
         To remove: [mcp:remove:server_name] To list: [mcp:list] \
-        Example: user pastes `npx -y @anthropic/mcp-server-brave` → you emit: \
-        [mcp:install:{"name":"brave-search","command":"npx","args":["-y","@anthropic/mcp-server-brave"],"env":{}}] \
-        After install, use the tools via [mcp:brave-search.brave_search:{"query":"..."}]. \
+        SECURITY: API keys are automatically secured in your Mac's Keychain. \
+        If you see `__keychain__` as an env value, the real key is ALREADY stored safely — \
+        use `__keychain__` as-is in your [mcp:install:] tag. \
+        NEVER echo, repeat, or display API keys/tokens/secrets in your response text. \
+        Just acknowledge briefly (e.g. "Got it, setting up perplexity with your key secured in Keychain~"). \
+        Example: user pastes config with PERPLEXITY_API_KEY: "__keychain__" → you emit: \
+        [mcp:install:{"name":"perplexity","command":"npx","args":["-y","@perplexity-ai/mcp-server"],"env":{"PERPLEXITY_API_KEY":"__keychain__"}}] \
         If <mcp_tools> block is in your system prompt, those tools are available NOW.
         """
     }

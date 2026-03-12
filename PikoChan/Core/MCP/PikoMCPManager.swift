@@ -239,12 +239,19 @@ final class PikoMCPManager {
     }
 
     /// Resolves sentinel values from Keychain back to real secrets.
+    /// Falls back to "prescan" account (pre-scanned from user input) if server-specific entry not found.
     func resolveSecretsFromKeychain(serverName: String, env: [String: String]) -> [String: String] {
         var resolved = env
         for (key, value) in env {
             if value == Self.keychainSentinel {
-                if let secret = PikoKeychain.load(account: keychainAccount(serverName: serverName, envKey: key)) {
+                let primaryAccount = keychainAccount(serverName: serverName, envKey: key)
+                if let secret = PikoKeychain.load(account: primaryAccount) {
                     resolved[key] = secret
+                } else if let secret = PikoKeychain.load(account: "mcp_prescan_\(key)") {
+                    // Migrate from prescan to proper server account.
+                    resolved[key] = secret
+                    PikoKeychain.save(account: primaryAccount, value: secret)
+                    PikoKeychain.delete(account: "mcp_prescan_\(key)")
                 }
             }
         }

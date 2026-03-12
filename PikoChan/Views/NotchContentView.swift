@@ -82,6 +82,13 @@ struct NotchContentView: View {
     private var showsResponseBubble: Bool { manager.showsResponseBubble }
     private var hasActions: Bool { !manager.actionHandler.actions.isEmpty }
 
+    /// Response text with any leftover tags stripped for display.
+    private var cleanedResponseText: String {
+        StreamingFeedRow.stripTagsForDisplay(
+            manager.lastResponseText.replacingOccurrences(of: "**", with: "")
+        )
+    }
+
     private var actionBlockHeight: CGFloat {
         let actions = manager.actionHandler.actions
         guard !actions.isEmpty else { return 0 }
@@ -373,7 +380,7 @@ struct NotchContentView: View {
                 }
             } else if manager.isResponseExpanded {
                 ScrollView(.vertical, showsIndicators: false) {
-                    Text(manager.lastResponseText)
+                    Text(cleanedResponseText)
                         .font(.system(size: 11, weight: .regular, design: .rounded))
                         .foregroundStyle(.white.opacity(0.65))
                         .lineSpacing(3)
@@ -392,7 +399,7 @@ struct NotchContentView: View {
                     }
                 )
             } else {
-                Text(manager.lastResponseText)
+                Text(cleanedResponseText)
                     .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(.white.opacity(0.65))
                     .lineSpacing(3)

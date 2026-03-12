@@ -40,6 +40,11 @@ struct FeedStatusDot: View {
                     .fill(result.exitCode == 0 ? Color.green.opacity(0.6) : Color.red.opacity(0.6))
                     .frame(width: 6, height: 6)
 
+            case .completedMCP(_, let isError):
+                Circle()
+                    .fill(isError ? Color.red.opacity(0.6) : Color.green.opacity(0.6))
+                    .frame(width: 6, height: 6)
+
             case .failed:
                 Circle()
                     .fill(Color.red.opacity(0.6))

@@ -16,12 +16,12 @@ struct ActivityFeedView: View {
         isExpanded ? 300 : 120
     }
 
-    /// Items to display: all in expanded, last 3 in compact.
+    /// Items to display: all in expanded, last 5 in compact.
     private var visibleItems: [PikoFeedItem] {
         if isExpanded {
             return manager.feedItems
         }
-        return Array(manager.feedItems.suffix(3))
+        return Array(manager.feedItems.suffix(5))
     }
 
     var body: some View {
