@@ -380,6 +380,16 @@ final class NotchManager {
         return isFeedExpanded ? 320 : 140
     }
 
+    /// Whether the music mini strip is visible in assistant views.
+    private var hasMusicMiniStrip: Bool {
+        nowPlaying?.isPlaying == true && nowPlaying?.hasTrack == true
+    }
+
+    /// Height of the music mini strip when visible (28px art + 12px padding + 6px bottom margin).
+    private var musicStripHeight: CGFloat {
+        hasMusicMiniStrip ? 46 : 0
+    }
+
     var activeContentHeight: CGFloat {
         let pad = PikoSettings.shared.contentPadding
         let sprite = PikoSettings.shared.spriteSize
@@ -387,7 +397,7 @@ final class NotchManager {
         // When feed has content, use feed-based layout (sprite is beside feed, not above).
         // Mini buttons are inside the feed area, so .expanded needs no extra control height.
         if hasFeedContent {
-            let base = notchSize.height + pad + feedBlockHeight
+            let base = notchSize.height + pad + musicStripHeight + feedBlockHeight
             switch state {
             case .typing:
                 return base + 8 + 34 + 12    // gap + text field + bottom
@@ -399,7 +409,7 @@ final class NotchManager {
         }
 
         // Vertical: sprite centered, input bar below, response below that.
-        let top = notchSize.height + pad
+        let top = notchSize.height + pad + musicStripHeight
         switch state {
         case .expanded:
             return top + sprite + 10 + 46 + 10 + responseBlockHeight
